@@ -15,17 +15,14 @@ import {
   getRoom, updateGameState, cleanupEmptyRooms,
 } from './manager.js';
 
-interface AuthData {
-  token?: string;
-  nickname?: string;
-  avatar?: string;
-}
+// 使用 any 类型绕过严格的 Socket.io 类型检查
+type AnySocket = Socket<any, any, any, any>;
 
 export function setupSocketHandlers(io: Server): void {
   // 定时清理空房间
   setInterval(cleanupEmptyRooms, 60000);
 
-  io.on('connection', (socket: Socket<AuthData>) => {
+  io.on('connection', (socket: AnySocket) => {
     const nickname = socket.handshake.auth.nickname || '玩家';
     const avatar = socket.handshake.auth.avatar || '';
     const playerId = socket.id;
@@ -43,7 +40,7 @@ export function setupSocketHandlers(io: Server): void {
       currentRoomId = room.id;
       socket.join(room.id);
       socket.emit('room_created', { room });
-      console.log(`[创建房间] ${room.id} 模式: ${mode}`);
+      console.log(`[创建房间] ${room.id} 模式=${mode}`);
     });
 
     socket.on('join_room', (roomId: string) => {
