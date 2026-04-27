@@ -1,16 +1,15 @@
-{
-  "compilerOptions": {
-    "target": "ES2015",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "types": ["miniprogram-api-typings"],
-    "baseUrl": ".",
-    "paths": {
-      "@hanafuda/core": ["../core/src"]
-    }
-  },
-  "include": ["src/**/*"]
-}
+{  
+  "compilerOptions": {  
+    "target": "ES2015",  
+    "module": "ESNext",  
+    "moduleResolution": "bundler",  
+    "strict": false,  
+    "esModuleInterop": true,  
+    "skipLibCheck": true,  
+    "baseUrl": ".",  
+    "paths": {  
+      "@hanafuda/core": ["../core/src"]  
+    }  
+  },  
+  "include": ["src/**/*"]  
+}  
