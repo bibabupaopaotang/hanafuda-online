@@ -1,0 +1,14 @@
+{
+  "description": "花札在线对战",
+  "packOptions": { "ignore": [], "include": [] },
+  "setting": {
+    "es6": true,
+    "enhance": true,
+    "minified": true,
+    "urlCheck": false
+  },
+  "compileType": "game",
+  "libVersion": "3.3.4",
+  "appid": "YOUR_APPID",
+  "projectname": "hanafuda-online"
+}

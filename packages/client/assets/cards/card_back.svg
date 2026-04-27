@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="192" viewBox="0 0 120 192">
+  <rect width="120" height="192" rx="8" fill="#2E7D32" stroke="#1B5E20" stroke-width="2"/>
+  <rect x="10" y="10" width="100" height="172" rx="6" fill="none" stroke="#4CAF50" stroke-width="1"/>
+  <rect x="16" y="16" width="88" height="160" rx="4" fill="none" stroke="#66BB6A" stroke-width="0.5"/>
+  <text x="60" y="106" text-anchor="middle" font-size="48" fill="#4CAF50" font-family="serif" opacity="0.6">花</text>
+</svg>

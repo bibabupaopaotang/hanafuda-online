@@ -1,0 +1,16 @@
+{
+  "name": "@hanafuda/client",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo '用微信开发者工具打开 packages/client 目录'",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hanafuda/core": "file:../core"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "miniprogram-api-typings": "^3.12.0"
+  }
+}
