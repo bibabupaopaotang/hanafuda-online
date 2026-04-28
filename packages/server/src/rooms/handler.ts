@@ -135,17 +135,25 @@ export function setupSocketHandlers(io: Server): void {
 
         // Koi-Koi 流程
         yakuResult = checkYaku(matchResult.state);
-        updateGameState(currentRoomId!, yakuResult.state);
-
-        io.to(currentRoomId).emit('state_update', {
-          action: 'play_card',
-          state: serializeState(yakuResult.state),
-        });
-
+        
         if (yakuResult.yakuFound) {
+          // 有役 → 弹窗决策，不换人
+          updateGameState(currentRoomId!, yakuResult.state);
+          io.to(currentRoomId).emit('state_update', {
+            action: 'play_card',
+            state: serializeState(yakuResult.state),
+          });
           const currentId = state.players[state.currentPlayerIndex]?.id;
           const targetSocket = [...io.sockets.sockets.values()].find(s => s.id === currentId);
           targetSocket?.emit('yaku_found', { yaku: yakuResult.state._currentYaku });
+        } else {
+          // 无役 → 换人继续
+          const nextState = nextPlayer(yakuResult.state);
+          updateGameState(currentRoomId!, nextState);
+          io.to(currentRoomId).emit('state_update', {
+            action: 'play_card',
+            state: serializeState(nextState),
+          });
         }
       } catch (err) {
         socket.emit('error', { message: (err as Error).message });
