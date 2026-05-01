@@ -154,7 +154,7 @@ function drawGameScene(W, H) {
 
   const field = gameState.field || [];
   const fStart = (W - field.length * (CONFIG.CARD_W + 6)) / 2;
-  field.forEach((id, i) => drawCardIMG(fStart + i * (CONFIG.CARD_W + 6), 120, id));
+  field.forEach((id, i) => drawCardImg(fStart + i * (CONFIG.CARD_W + 6), 120, id));
 
   // 山札
   ctx.fillStyle = '#5D4037'; roundRect(W-70, 100, 50, 80, 6); ctx.fill();
@@ -168,7 +168,7 @@ function drawGameScene(W, H) {
   const hStart = (W - myHand.length * (CONFIG.CARD_W + 4)) / 2;
   myHand.forEach((id, i) => {
     const y = (id === selectedCardId) ? 430 : 450;
-    drawCardIMG(hStart + i * (CONFIG.CARD_W + 4), y, id, id === selectedCardId);
+    drawCardImg(hStart + i * (CONFIG.CARD_W + 4), y, id, id === selectedCardId);
   });
 
   drawText(statusMsg, W/2, H-15, 'bold 16px sans-serif', '#ffcc00');
@@ -212,7 +212,7 @@ function drawPopup(W, H) {
 }
 
 // ================= 卡牌渲染（使用 PNG 图片）=================
-function drawCardIMG(x, y, id, selected = false) {
+function drawCardImg(x, y, id, selected = false) {
   if (!cardImages[id]) return;
   const img = cardImages[id];
   
@@ -249,7 +249,7 @@ function drawAnimatingCard(progress) {
   const eased = easeOutCubic(progress);
   const cx = a.fromX + (a.toX - a.fromX) * eased;
   const cy = a.fromY + (a.toY - a.fromY) * eased - Math.sin(progress * Math.PI) * 30;
-  drawCardIMG(cx, cy, a.id, true);
+  drawCardImg(cx, cy, a.id, true);
 }
 
 function playCardAnim(id, fromX, fromY, toX, toY) {
