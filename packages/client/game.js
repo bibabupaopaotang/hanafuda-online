@@ -9,8 +9,6 @@ const ctx = canvas.getContext('2d');
 
 const CONFIG = {
   SERVER_URL: 'ws://47.253.96.212/socket.io/?EIO=4&transport=websocket',
-  CARD_W_RATIO: 0.22,   // 卡牌宽度占屏幕宽度的比例
-  CARD_H_RATIO: 0.12,   // 卡牌高度占屏幕高度的比例
   ANIM_DURATION: 400,
   TURN_TIMEOUT: 15000
 };
@@ -50,28 +48,37 @@ function loadCardImages(callback) {
     if (loaded >= total && callback) callback();
   }
   
+  // 微信小游戏加载本地图片需要用相对路径
+  const basePath = './assets/cards/';
+  
   for (let i = 0; i < 48; i++) {
     const img = wx.createImage();
     img.onload = onCardLoad;
-    img.src = `assets/cards/card_${String(i).padStart(2, '0')}.png`;
+    img.src = `${basePath}card_${String(i).padStart(2, '0')}.png`;
     cardImages[i] = img;
   }
   
   cardBackImg = wx.createImage();
   cardBackImg.onload = onCardLoad;
-  cardBackImg.src = 'assets/cards/card_back.png';
+  cardBackImg.src = `${basePath}card_back.png`;
 }
 
 // ================= 渲染 =================
+// 卡牌标准尺寸
+const STD_CARD_W = 60;
+const STD_CARD_H = 96;
+const STD_CARD_GAP = 8;
+
 function render() {
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
   _buttons = [];
 
-  // 动态计算卡牌尺寸
-  const CARD_W = Math.min(W * CONFIG.CARD_W_RATIO, 80);
-  const CARD_H = CARD_W * 1.6;
-  const CARD_GAP = CARD_W * 0.1;
+  // 根据屏幕宽度动态缩放卡牌
+  const scale = Math.min(W / 375, 1.2); // 基准宽度 375px，最大 1.2 倍
+  const CARD_W = STD_CARD_W * scale;
+  const CARD_H = STD_CARD_H * scale;
+  const CARD_GAP = STD_CARD_GAP * scale;
 
   if (currentState === STATE.MENU) drawMenu(W, H);
   else if (currentState === STATE.LOBBY) drawLobby(W, H);
