@@ -1,7 +1,6 @@
 /**
- * 花札 Hanafuda - 最终修复版
- * 修复：1. 回合判断逻辑（基于 seatIndex）
- *       2. 手机屏幕适配（动态比例坐标）
+ * 花札 Hanafuda - 稳定版
+ * 修复：图片加载、屏幕适配、双人操作
  */
 
 const canvas = wx.createCanvas();
@@ -9,7 +8,6 @@ const ctx = canvas.getContext('2d');
 
 const CONFIG = {
   SERVER_URL: 'ws://47.253.96.212/socket.io/?EIO=4&transport=websocket',
-  ANIM_DURATION: 400,
   TURN_TIMEOUT: 15000
 };
 
@@ -17,26 +15,23 @@ const STATE = { MENU: 0, LOBBY: 1, GAME: 2, RESULT: 3, POPUP: 4 };
 
 // 状态变量
 let currentState = STATE.MENU;
-let mySeatIndex = 0; // 记录自己的位置 (0 或 1)
+let mySeatIndex = 0;
 let myRoomId = '';
 let playerCount = 0;
 let gameState = null;
 let resultData = null;
 let statusMsg = '初始化中...';
 let turnTimer = null;
+let selectedCardId = null;
 
-// 动画系统
+// 动画
 let animatingCard = null;
-let popupState = { show: false, animProgress: 1 };
+let popupState = { show: false };
 
-// UI 元素
+// UI
 let _buttons = [];
 let cardImages = {};
 let cardBackImg = null;
-
-// 常量
-const MONTHS = ['', '松', '梅', '桜', '藤', '菖蒲', '牡丹', '萩', '芒', '菊', '紅葉', '柳', '桐'];
-const LIGHT_IDS = [0, 8, 28, 40, 44];
 
 // ================= 加载卡牌图片 =================
 function loadCardImages(callback) {
@@ -45,51 +40,55 @@ function loadCardImages(callback) {
   
   function onCardLoad() {
     loaded++;
-    if (loaded >= total && callback) callback();
+    if (loaded >= total && callback) {
+      console.log('[资源] 所有卡牌加载完成');
+      callback();
+    }
   }
   
-  // 微信小游戏加载本地图片需要用相对路径
-  const basePath = './assets/cards/';
-  
+  // 微信小游戏加载本地图片
   for (let i = 0; i < 48; i++) {
     const img = wx.createImage();
     img.onload = onCardLoad;
-    img.src = `${basePath}card_${String(i).padStart(2, '0')}.png`;
+    img.onerror = () => { console.error('加载失败：card_' + i); loaded++; };
+    img.src = './assets/cards/card_' + String(i).padStart(2, '0') + '.png';
     cardImages[i] = img;
   }
   
   cardBackImg = wx.createImage();
   cardBackImg.onload = onCardLoad;
-  cardBackImg.src = `${basePath}card_back.png`;
+  cardBackImg.onerror = () => { console.error('加载失败：card_back'); loaded++; };
+  cardBackImg.src = './assets/cards/card_back.png';
 }
 
 // ================= 渲染 =================
-// 卡牌标准尺寸
-const STD_CARD_W = 60;
-const STD_CARD_H = 96;
-const STD_CARD_GAP = 8;
-
 function render() {
-  const W = canvas.width, H = canvas.height;
+  const W = canvas.width;
+  const H = canvas.height;
   ctx.clearRect(0, 0, W, H);
   _buttons = [];
 
-  // 根据屏幕宽度动态缩放卡牌
-  const scale = Math.min(W / 375, 1.2); // 基准宽度 375px，最大 1.2 倍
-  const CARD_W = STD_CARD_W * scale;
-  const CARD_H = STD_CARD_H * scale;
-  const CARD_GAP = STD_CARD_GAP * scale;
+  // 动态卡牌尺寸（适配不同屏幕）
+  const baseW = Math.min(W, 400);
+  const scale = baseW / 375;
+  const CARD_W = 50 * scale;
+  const CARD_H = 80 * scale;
+  const CARD_GAP = 6 * scale;
 
   if (currentState === STATE.MENU) drawMenu(W, H);
   else if (currentState === STATE.LOBBY) drawLobby(W, H);
   else if (currentState === STATE.GAME) drawGameScene(W, H, CARD_W, CARD_H, CARD_GAP);
   else if (currentState === STATE.RESULT) drawResultScreen(W, H);
-  else if (currentState === STATE.POPUP) { drawGameScene(W, H, CARD_W, CARD_H, CARD_GAP); drawPopup(W, H); }
+  else if (currentState === STATE.POPUP) { 
+    drawGameScene(W, H, CARD_W, CARD_H, CARD_GAP); 
+    drawPopup(W, H); 
+  }
 
+  // 动画
   if (animatingCard) {
     const progress = Math.min((Date.now() - animatingCard.startTime) / animatingCard.duration, 1);
     if (progress < 1) {
-      drawAnimatingCard(progress);
+      drawAnimatingCard(progress, CARD_W, CARD_H);
       requestAnimationFrame(render);
       return;
     } else {
@@ -98,6 +97,7 @@ function render() {
   }
 }
 
+// ================= 背景 =================
 function drawBg() {
   const W = canvas.width, H = canvas.height;
   const grad = ctx.createLinearGradient(0, 0, 0, H);
@@ -105,379 +105,555 @@ function drawBg() {
   grad.addColorStop(1, '#0b3d1e');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
-  // 网格
-  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-  ctx.lineWidth = 1;
-  for (let x = 0; x < W; x += 20) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-  for (let y = 0; y < H; y += 20) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
 }
 
-function drawText(t, x, y, f, c) {
-  ctx.fillStyle = c; ctx.font = f; ctx.textAlign = 'center'; ctx.fillText(t, x, y);
+// ================= 文字 =================
+function drawText(t, x, y, size, color) {
+  ctx.fillStyle = color || '#fff';
+  ctx.font = size + 'px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(t, x, y);
 }
 
-function drawBtn(text, x, y, w, h, color, onClick, disabled = false) {
+// ================= 按钮 =================
+function drawBtn(text, x, y, w, h, color, onClick, disabled) {
   ctx.fillStyle = disabled ? '#555' : color;
-  roundRect(x, y, w, h, h * 0.15); ctx.fill();
-  ctx.fillStyle = 'rgba(0,0,0,0.2)';
-  roundRect(x, y + h * 0.05, w, h, h * 0.15); ctx.fill();
+  roundRect(x, y, w, h, 8);
+  ctx.fill();
+  
   ctx.fillStyle = disabled ? '#888' : '#fff';
-  ctx.font = `bold ${h * 0.4}px sans-serif`; ctx.textAlign = 'center';
+  ctx.font = 'bold ' + (h * 0.45) + 'px sans-serif';
+  ctx.textAlign = 'center';
   ctx.fillText(text, x + w/2, y + h * 0.6);
+  
   if (!disabled) _buttons.push({ x, y, w, h, onClick });
 }
 
 function roundRect(x, y, w, h, r) {
   ctx.beginPath();
-  ctx.moveTo(x+r, y); ctx.lineTo(x+w-r, y);
-  ctx.quadraticCurveTo(x+w, y, x+w, y+r); ctx.lineTo(x+w, y+h-r);
-  ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h); ctx.lineTo(x+r, y+h);
-  ctx.quadraticCurveTo(x, y+h, x, y+h-r); ctx.lineTo(x, y+r);
-  ctx.quadraticCurveTo(x, y, x+r, y); ctx.closePath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y);
+  ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r);
+  ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h);
+  ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r);
+  ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
 }
 
-// ================= 界面绘制 =================
+// ================= 界面：菜单 =================
 function drawMenu(W, H) {
   drawBg();
-  ctx.fillStyle = '#fff'; ctx.font = `bold ${H * 0.08}px serif`; ctx.textAlign = 'center';
-  ctx.shadowColor = 'rgba(255,215,0,0.5)'; ctx.shadowBlur = 15;
-  ctx.fillText('🌸 花札 Hanafuda 🌸', W/2, H * 0.3); ctx.shadowBlur = 0;
   
-  const btnW = W * 0.5, btnH = H * 0.08;
-  drawBtn('创建房间', W/2 - btnW/2, H * 0.45, btnW, btnH, '#4CAF50', () => { statusMsg='创建中...'; render(); send('create_room'); });
-  drawBtn('加入房间', W/2 - btnW/2, H * 0.58, btnW, btnH, '#2196F3', () => promptJoin());
-  drawText(statusMsg, W/2, H * 0.75, `${H * 0.03}px sans-serif`, '#aaa');
+  drawText('🌸 花札 Hanafuda 🌸', W/2, H * 0.3, 32, '#fff');
+  
+  const btnW = W * 0.6;
+  const btnH = 50;
+  
+  drawBtn('创建房间', W/2 - btnW/2, H * 0.45, btnW, btnH, '#4CAF50', () => {
+    statusMsg = '创建中...';
+    render();
+    send('create_room');
+  });
+  
+  drawBtn('加入房间', W/2 - btnW/2, H * 0.58, btnW, btnH, '#2196F3', () => {
+    promptJoin();
+  });
+  
+  drawText(statusMsg, W/2, H * 0.75, 16, '#aaa');
 }
 
+// ================= 界面：大厅 =================
 function drawLobby(W, H) {
   drawBg();
-  ctx.fillStyle = '#fff'; ctx.font = `bold ${H * 0.06}px serif`; ctx.textAlign = 'center';
-  ctx.fillText('🏠 房间大厅', W/2, H * 0.2);
-  ctx.fillStyle = '#ffcc00'; ctx.font = `${H * 0.05}px sans-serif`;
-  ctx.fillText(`房间号：${myRoomId}`, W/2, H * 0.3);
-  ctx.fillStyle = '#fff'; ctx.fillText(`人数：${playerCount} / 2`, W/2, H * 0.4);
-
-  const btnW = W * 0.5, btnH = H * 0.08;
-  drawBtn('开始游戏', W/2 - btnW/2, H * 0.55, btnW, btnH, '#FF9800', () => { statusMsg='请求开始...'; render(); send('start_game'); });
-  drawText('提示：目前支持单人测试', W/2, H * 0.65, `${H * 0.025}px sans-serif`, '#aaa');
+  
+  drawText('🏠 房间大厅', W/2, H * 0.2, 28, '#fff');
+  drawText('房间号：' + myRoomId, W/2, H * 0.35, 24, '#ffcc00');
+  drawText('人数：' + playerCount + ' / 2', W/2, H * 0.45, 20, '#fff');
+  
+  const btnW = W * 0.6;
+  const btnH = 50;
+  
+  drawBtn('开始游戏', W/2 - btnW/2, H * 0.55, btnW, btnH, '#FF9800', () => {
+    statusMsg = '请求开始...';
+    render();
+    send('start_game');
+  });
+  
+  drawText('提示：单人测试也可开始', W/2, H * 0.7, 14, '#aaa');
 }
 
+// ================= 界面：游戏场景 =================
 function drawGameScene(W, H, cw, ch, gap) {
   drawBg();
-  if (!gameState) { drawText('等待发牌...', W/2, H/2, `bold ${H * 0.05}px sans-serif`, '#fff'); return; }
+  
+  if (!gameState) {
+    drawText('等待发牌...', W/2, H/2, 24, '#fff');
+    return;
+  }
 
   // --- 对手手牌 (顶部) ---
-  drawText('对手', W * 0.15, H * 0.05, `${H * 0.03}px sans-serif`, '#aaa');
-  const oppHand = gameState.hands[1] || []; // 简化：默认自己在 0 位，对手在 1 位。如果是 1 位，对手就是 0 位。
-  const myOppIdx = (mySeatIndex + 1) % 2;
-  const realOppHand = gameState.hands[myOppIdx] || [];
-  
-  // 动态计算对手手牌起始位置
-  const oppCardW = cw * 0.8;
-  const oppStart = (W - realOppHand.length * (oppCardW + 5)) / 2;
-  for (let i = 0; i < realOppHand.length; i++) {
-    drawCardImg(oppStart + i * (oppCardW + 5), H * 0.08, null, oppCardW, ch * 0.8);
+  drawText('对手', W * 0.1, H * 0.06, 14, '#aaa');
+  const oppIdx = (mySeatIndex + 1) % 2;
+  const oppHand = gameState.hands[oppIdx] || [];
+  const oppStart = (W - oppHand.length * (cw * 0.7 + 3)) / 2;
+  for (let i = 0; i < oppHand.length; i++) {
+    drawCardImg(oppStart + i * (cw * 0.7 + 3), H * 0.08, null, cw * 0.7, ch * 0.7);
   }
 
   // --- 场牌区 (中间) ---
-  const fieldAreaY = H * 0.25;
-  const fieldAreaH = H * 0.35;
-  ctx.fillStyle = '#082d15'; roundRect(W * 0.05, fieldAreaY, W * 0.9, fieldAreaH, 10); ctx.fill();
-  ctx.strokeStyle = '#2e5c3e'; ctx.lineWidth = 2; roundRect(W * 0.05, fieldAreaY, W * 0.9, fieldAreaH, 10); ctx.stroke();
-  drawText('场牌区', W/2, fieldAreaY + H * 0.04, `${H * 0.025}px sans-serif`, '#558855');
+  const fieldY = H * 0.25;
+  const fieldH = H * 0.35;
+  ctx.fillStyle = '#082d15';
+  roundRect(W * 0.05, fieldY, W * 0.9, fieldH, 10);
+  ctx.fill();
+  ctx.strokeStyle = '#2e5c3e';
+  ctx.lineWidth = 2;
+  roundRect(W * 0.05, fieldY, W * 0.9, fieldH, 10);
+  ctx.stroke();
+  
+  drawText('场牌区', W/2, fieldY + fieldH * 0.06, 16, '#558855');
 
   const field = gameState.field || [];
-  // 场牌居中排列
-  const fTotalW = field.length * (cw + gap);
-  let fStart = (W - fTotalW) / 2;
-  // 如果牌太多，缩小间距
-  if (fTotalW > W * 0.85) {
-     fStart = W * 0.075;
-  }
-  field.forEach((id, i) => drawCardIMG(fStart + i * (cw + gap), fieldAreaY + H * 0.1, id, cw, ch));
+  const fStart = (W - field.length * (cw + gap)) / 2;
+  field.forEach((id, i) => {
+    drawCardIMG(fStart + i * (cw + gap), fieldY + fieldH * 0.15, id, cw, ch);
+  });
 
   // --- 山札 (右侧) ---
-  const deckX = W * 0.85;
-  const deckY = fieldAreaY;
-  ctx.fillStyle = '#5D4037'; roundRect(deckX, deckY, cw, ch, 6); ctx.fill();
-  ctx.fillStyle = '#fff'; ctx.font = `${H * 0.02}px sans-serif`; ctx.textAlign = 'center';
-  ctx.fillText('山札', deckX + cw/2, deckY + ch * 0.2);
-  ctx.fillText(`${gameState.deck.length}`, deckX + cw/2, deckY + ch * 0.4);
+  const deckX = W * 0.82;
+  const deckY = fieldY + fieldH * 0.1;
+  ctx.fillStyle = '#5D4037';
+  roundRect(deckX, deckY, cw, ch, 6);
+  ctx.fill();
+  drawText('山札', deckX + cw/2, deckY + ch * 0.25, 12, '#fff');
+  drawText(String(gameState.deck.length), deckX + cw/2, deckY + ch * 0.45, 14, '#fff');
 
   // --- 回合指示器 (右上角) ---
   drawTurnIndicator(W, H);
 
   // --- 玩家手牌 (底部) ---
-  const handAreaY = H * 0.7;
-  const myRealHand = gameState.hands[mySeatIndex] || [];
-  const hTotalW = myRealHand.length * (cw + gap);
+  const handY = H * 0.65;
+  const myHand = gameState.hands[mySeatIndex] || [];
+  const hTotalW = myHand.length * (cw + gap);
   const hStart = (W - hTotalW) / 2;
-  myRealHand.forEach((id, i) => {
+  
+  myHand.forEach((id, i) => {
     const isSel = (id === selectedCardId);
-    const y = isSel ? handAreaY - H * 0.05 : handAreaY;
+    const y = isSel ? handY - 15 : handY;
     drawCardIMG(hStart + i * (cw + gap), y, id, cw, ch, isSel);
   });
 
-  drawText(statusMsg, W/2, H - H * 0.03, `bold ${H * 0.03}px sans-serif`, '#ffcc00');
+  drawText(statusMsg, W/2, H - 20, 18, '#ffcc00');
 }
 
+// ================= 回合指示器 =================
 function drawTurnIndicator(W, H) {
   if (!gameState) return;
   
-  // 修复：使用 mySeatIndex 对比
   const isMyTurn = (gameState.currentPlayerIndex === mySeatIndex);
+  const x = W * 0.72;
+  const y = H * 0.03;
+  const w = W * 0.25;
+  const h = 35;
   
-  const x = W * 0.75, y = H * 0.05, w = W * 0.22, h = H * 0.05;
-  ctx.fillStyle = isMyTurn ? 'rgba(76,175,80,0.8)' : 'rgba(255,152,0,0.8)';
-  roundRect(x, y, w, h, 10); ctx.fill();
+  ctx.fillStyle = isMyTurn ? 'rgba(76,175,80,0.85)' : 'rgba(255,152,0,0.85)';
+  roundRect(x, y, w, h, 8);
+  ctx.fill();
   
-  const fontSize = h * 0.6;
-  drawText(isMyTurn ? '✋ 你的回合' : '⏳ 对手回合', x + w/2, y + h * 0.65, `bold ${fontSize}px sans-serif`, '#fff');
+  drawText(isMyTurn ? '✋ 你的回合' : '⏳ 对手回合', x + w/2, y + h * 0.65, 14, '#fff');
 }
 
+// ================= 界面：结算 =================
 function drawResultScreen(W, H) {
   drawBg();
-  ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, W, H);
-  const pw = W * 0.7, ph = H * 0.5;
-  ctx.fillStyle = '#fff'; roundRect(W/2-pw/2, H/2-ph/2, pw, ph, 15); ctx.fill();
-  ctx.strokeStyle = '#FFD700'; ctx.lineWidth = 3; roundRect(W/2-pw/2, H/2-ph/2, pw, ph, 15); ctx.stroke();
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(0, 0, W, H);
+  
+  const pw = W * 0.75;
+  const ph = H * 0.5;
+  
+  ctx.fillStyle = '#fff';
+  roundRect(W/2 - pw/2, H/2 - ph/2, pw, ph, 15);
+  ctx.fill();
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 3;
+  roundRect(W/2 - pw/2, H/2 - ph/2, pw, ph, 15);
+  ctx.stroke();
 
-  drawText('🏁 本局结束', W/2, H/2 - ph*0.3, `bold ${H*0.05}px sans-serif`, '#333');
+  drawText('🏁 本局结束', W/2, H/2 - ph * 0.3, 26, '#333');
+  
   if (resultData) {
     const s = resultData.roundScores;
-    drawText(`本局：${s[0]} - ${s[1]}`, W/2, H/2 - ph*0.1, `${H*0.03}px sans-serif`, '#555');
-    drawText(`累计：${resultData.totalScores[0]} - ${resultData.totalScores[1]}`, W/2, H/2 + ph*0.05, `bold ${H*0.04}px sans-serif`, '#000');
-    if (resultData.gameOver) drawText('游戏结束！', W/2, H/2 + ph*0.2, `bold ${H*0.03}px sans-serif`, '#D32F2F');
+    drawText('本局：' + s[0] + ' - ' + s[1], W/2, H/2 - ph * 0.1, 18, '#555');
+    drawText('累计：' + resultData.totalScores[0] + ' - ' + resultData.totalScores[1], W/2, H/2 + ph * 0.05, 22, '#000');
+    if (resultData.gameOver) {
+      drawText('游戏结束！', W/2, H/2 + ph * 0.2, 20, '#D32F2F');
+    }
   }
 
-  const bw = pw * 0.6, bh = ph * 0.15;
-  drawBtn('返回大厅', W/2-bw/2, H/2 + ph*0.3, bw, bh, '#4CAF50', () => { currentState=STATE.LOBBY; gameState=null; resultData=null; render(); });
+  const bw = pw * 0.5;
+  const bh = ph * 0.12;
+  drawBtn('返回大厅', W/2 - bw/2, H/2 + ph * 0.35, bw, bh, '#4CAF50', () => {
+    currentState = STATE.LOBBY;
+    gameState = null;
+    resultData = null;
+    render();
+  });
 }
 
+// ================= 界面：弹窗 =================
 function drawPopup(W, H) {
   if (!popupState.show) return;
-  ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0, 0, W, H);
-  const pw = W * 0.7, ph = H * 0.4;
-  const px = W/2 - pw/2, py = H/2 - ph/2;
   
-  ctx.fillStyle = '#fff'; roundRect(px, py, pw, ph, 15); ctx.fill();
-  ctx.strokeStyle = '#FFD700'; ctx.lineWidth = 2; roundRect(px, py, pw, ph, 15); ctx.stroke();
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(0, 0, W, H);
+  
+  const pw = W * 0.75;
+  const ph = H * 0.4;
+  const px = W/2 - pw/2;
+  const py = H/2 - ph/2;
+  
+  ctx.fillStyle = '#fff';
+  roundRect(px, py, pw, ph, 15);
+  ctx.fill();
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 2;
+  roundRect(px, py, pw, ph, 15);
+  ctx.stroke();
 
-  drawText('🎉 役达成！', W/2, py + ph * 0.25, `bold ${H*0.04}px sans-serif`, '#D32F2F');
-  drawText('是否继续 (Koi-Koi)?', W/2, py + ph * 0.4, `${H*0.03}px sans-serif`, '#333');
+  drawText('🎉 役达成！', W/2, py + ph * 0.25, 24, '#D32F2F');
+  drawText('是否继续 (Koi-Koi)?', W/2, py + ph * 0.42, 16, '#333');
   
-  const bw = pw * 0.35, bh = ph * 0.2;
-  drawBtn('继续 (x2)', px + pw * 0.1, py + ph * 0.6, bw, bh, '#4CAF50', () => { popupState.show=false; send('koi_koi'); statusMsg='继续！'; render(); });
-  drawBtn('结算', px + pw * 0.55, py + ph * 0.6, bw, bh, '#f44336', () => { popupState.show=false; send('end_round'); statusMsg='结算中...'; render(); });
+  const bw = pw * 0.35;
+  const bh = ph * 0.18;
+  
+  drawBtn('继续 (x2)', px + pw * 0.1, py + ph * 0.62, bw, bh, '#4CAF50', () => {
+    popupState.show = false;
+    send('koi_koi');
+    statusMsg = '继续游戏！';
+    render();
+  });
+  
+  drawBtn('结算', px + pw * 0.55, py + ph * 0.62, bw, bh, '#f44336', () => {
+    popupState.show = false;
+    send('end_round');
+    statusMsg = '结算中...';
+    render();
+  });
 }
 
 // ================= 卡牌渲染 =================
-function drawCardIMG(x, y, id, w, h, selected = false) {
-  if (id === null || id === undefined) return; // 不渲染空牌
+function drawCardIMG(x, y, id, w, h, selected) {
+  if (id === null || id === undefined) return;
+  
   const img = cardImages[id];
   if (!img) {
     // 图片未加载时的占位符
-    ctx.fillStyle = '#fff'; roundRect(x, y, w, h, 4); ctx.fill();
+    ctx.fillStyle = '#fff';
+    roundRect(x, y, w, h, 4);
+    ctx.fill();
+    ctx.fillStyle = '#333';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('ID:' + id, x + w/2, y + h/2);
     return;
   }
   
-  ctx.shadowBlur = selected ? 15 : 5;
-  ctx.shadowColor = selected ? '#FFD700' : 'rgba(0,0,0,0.4)';
-  ctx.shadowOffsetY = selected ? -10 : 2;
+  // 阴影
+  ctx.shadowBlur = selected ? 10 : 3;
+  ctx.shadowColor = selected ? '#FFD700' : 'rgba(0,0,0,0.5)';
+  ctx.shadowOffsetY = selected ? -8 : 2;
   
+  // 绘制图片
   ctx.drawImage(img, x, y, w, h);
   
+  // 选中边框
   if (selected) {
-    ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 10;
-    ctx.strokeStyle = '#FFD700'; ctx.lineWidth = 3;
-    roundRect(x-2, y-2, w+4, h+4, 6); ctx.stroke();
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth = 3;
+    roundRect(x - 2, y - 2, w + 4, h + 4, 6);
+    ctx.stroke();
   }
-  ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+  
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
 }
 
-function drawCardBack(x, y, w, h) {
-  if (!cardBackImg) return;
+function drawCardImg(x, y, id, w, h) {
+  // 对手牌背
+  if (!cardBackImg) {
+    ctx.fillStyle = '#2E7D32';
+    roundRect(x, y, w, h, 4);
+    ctx.fill();
+    return;
+  }
   ctx.drawImage(cardBackImg, x, y, w, h);
 }
 
-// ================= 动画 & 缓动 =================
-function drawAnimatingCard(progress) {
+// ================= 动画 =================
+function drawAnimatingCard(progress, w, h) {
   if (!animatingCard) return;
   const a = animatingCard;
   const eased = 1 - Math.pow(1 - progress, 3);
   const cx = a.fromX + (a.toX - a.fromX) * eased;
-  const cy = a.fromY + (a.toY - a.fromY) * eased - Math.sin(progress * Math.PI) * 30;
-  drawCardIMG(cx, cy, a.id, animatingCard.w, animatingCard.h, true);
+  const cy = a.fromY + (a.toY - a.fromY) * eased - Math.sin(progress * Math.PI) * 20;
+  drawCardIMG(cx, cy, a.id, w, h, true);
 }
 
-function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
-function easeOutBack(t) { const c=1.70158; return 1+(c+1)*Math.pow(t-1,3)+c*Math.pow(t-1,2); }
-
 // ================= 交互 =================
-let selectedCardId = null;
-
 wx.onTouchStart(e => {
   const t = e.touches[0];
-  const x = t.clientX, y = t.clientY;
+  const x = t.clientX;
+  const y = t.clientY;
 
   // 1. 弹窗优先
   if (currentState === STATE.POPUP) {
-    const pw = canvas.width * 0.7, ph = canvas.height * 0.4;
-    const px = canvas.width/2 - pw/2, py = canvas.height/2 - ph/2;
-    const bw = pw * 0.35, bh = ph * 0.2;
-    if (x > px + pw*0.1 && x < px + pw*0.1 + bw && y > py + ph*0.6 && y < py + ph*0.6 + bh) {
-      popupState.show = false; send('koi_koi'); statusMsg='继续！'; render(); return;
+    const W = canvas.width;
+    const H = canvas.height;
+    const pw = W * 0.75;
+    const ph = H * 0.4;
+    const px = W/2 - pw/2;
+    const py = H/2 - ph/2;
+    const bw = pw * 0.35;
+    const bh = ph * 0.18;
+    
+    if (x > px + pw * 0.1 && x < px + pw * 0.1 + bw && y > py + ph * 0.62 && y < py + ph * 0.62 + bh) {
+      popupState.show = false;
+      send('koi_koi');
+      statusMsg = '继续！';
+      render();
+      return;
     }
-    if (x > px + pw*0.55 && x < px + pw*0.55 + bw && y > py + ph*0.6 && y < py + ph*0.6 + bh) {
-      popupState.show = false; send('end_round'); statusMsg='结算中...'; render(); return;
+    if (x > px + pw * 0.55 && x < px + pw * 0.55 + bw && y > py + ph * 0.62 && y < py + ph * 0.62 + bh) {
+      popupState.show = false;
+      send('end_round');
+      statusMsg = '结算中...';
+      render();
+      return;
     }
     return;
   }
 
   // 2. 按钮点击
-  for (const b of _buttons) {
-    if (x>b.x && x<b.x+b.w && y>b.y && y<b.y+b.h) { b.onClick(); _buttons=[]; return; }
+  for (let i = 0; i < _buttons.length; i++) {
+    const b = _buttons[i];
+    if (x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h) {
+      b.onClick();
+      _buttons = [];
+      return;
+    }
   }
   _buttons = [];
 
   // 3. 手牌点击
   if (currentState === STATE.GAME && gameState) {
-    const W = canvas.width, H = canvas.height;
-    const cw = Math.min(W * CONFIG.CARD_W_RATIO, 80);
-    const ch = cw * 1.6;
-    const gap = cw * 0.1;
-    const handAreaY = H * 0.7;
-    const myRealHand = gameState.hands[mySeatIndex] || [];
-    const hTotalW = myRealHand.length * (cw + gap);
+    const W = canvas.width;
+    const H = canvas.height;
+    const baseW = Math.min(W, 400);
+    const scale = baseW / 375;
+    const cw = 50 * scale;
+    const ch = 80 * scale;
+    const gap = 6 * scale;
+    const handY = H * 0.65;
+    const myHand = gameState.hands[mySeatIndex] || [];
+    const hTotalW = myHand.length * (cw + gap);
     const hStart = (W - hTotalW) / 2;
 
-    // 从后往前遍历（防止重叠遮挡）
-    for (let i = myRealHand.length - 1; i >= 0; i--) {
-      const id = myRealHand[i];
+    for (let i = myHand.length - 1; i >= 0; i--) {
+      const id = myHand[i];
       const isSel = (id === selectedCardId);
-      const cardY = isSel ? handAreaY - H * 0.05 : handAreaY;
       const cardX = hStart + i * (cw + gap);
+      const cardY = isSel ? handY - 15 : handY;
       
       if (x > cardX && x < cardX + cw && y > cardY && y < cardY + ch) {
-        handleTap(id, cardX, cardY); return;
+        handleTap(id, cardX, cardY, cw, ch, gap, handY);
+        return;
       }
     }
   }
 });
 
-let selectedTapId = null;
-function handleTap(id, fromX, fromY) {
+function handleTap(id, fromX, fromY, cw, ch, gap, handY) {
   // 检查是否轮到自己
-  if (gameState.currentPlayerIndex !== mySeatIndex) { statusMsg = '不是你的回合'; render(); return; }
+  if (gameState.currentPlayerIndex !== mySeatIndex) {
+    statusMsg = '不是你的回合！';
+    render();
+    return;
+  }
 
-  if (selectedTapId === id) {
-    // 再次点击同一张牌 -> 出牌
+  if (selectedCardId === id) {
+    // 再次点击 -> 出牌
     const W = canvas.width;
-    const cw = Math.min(W * CONFIG.CARD_W_RATIO, 80);
-    const gap = cw * 0.1;
+    const H = canvas.height;
+    const fieldY = H * 0.25;
     const field = gameState.field || [];
-    const fTotalW = (field.length + 1) * (cw + gap);
-    const fStart = (W - fTotalW) / 2;
+    const fStart = (W - (field.length + 1) * (cw + gap)) / 2;
+    const toX = fStart + field.length * (cw + gap);
+    const toY = fieldY + H * 0.15;
     
-    playCardAnim(id, fromX, fromY, fStart + field.length * (cw + gap), canvas.height * 0.35);
-    statusMsg = '出牌中...'; render();
+    playCardAnim(id, fromX, fromY, toX, toY);
+    statusMsg = '出牌中...';
+    render();
     send('play_card', id);
-    selectedTapId = null;
     selectedCardId = null;
   } else {
     // 第一次点击 -> 选中
-    selectedTapId = id;
     selectedCardId = id;
     render();
   }
 }
 
+function playCardAnim(id, fromX, fromY, toX, toY) {
+  animatingCard = {
+    id: id,
+    fromX: fromX,
+    fromY: fromY,
+    toX: toX,
+    toY: toY,
+    startTime: Date.now(),
+    duration: 400
+  };
+}
+
 function promptJoin() {
-  wx.showModal({ title:'加入房间', editable:true, placeholderText:'6位数字',
-    success: res => { if(res.confirm && res.content) { statusMsg='加入中...'; render(); send('join_room', res.content); } }
+  wx.showModal({
+    title: '加入房间',
+    editable: true,
+    placeholderText: '6 位数字',
+    success: res => {
+      if (res.confirm && res.content) {
+        statusMsg = '加入中...';
+        render();
+        send('join_room', res.content);
+      }
+    }
   });
 }
 
 function send(ev, data) {
   const payload = data !== undefined ? JSON.stringify(data) : '';
-  wx.sendSocketMessage({ data: payload ? `42["${ev}",${payload}]` : `42["${ev}"]` });
+  const msg = payload ? '42["' + ev + '",' + payload + ']' : '42["' + ev + '"]';
+  wx.sendSocketMessage({ data: msg });
 }
 
 // ================= 网络 =================
-connectServer();
 function connectServer() {
-  wx.connectSocket({ url: CONFIG.SERVER_URL, fail: () => { statusMsg='连接失败'; render(); } });
+  wx.connectSocket({
+    url: CONFIG.SERVER_URL,
+    fail: () => {
+      statusMsg = '连接失败';
+      render();
+    }
+  });
+
+  wx.onSocketOpen(() => {
+    console.log('[Socket] 已连接');
+  });
+
   wx.onSocketMessage(res => {
     let d = res.data;
-    if (d instanceof ArrayBuffer) d = String.fromCharCode.apply(null, new Uint8Array(d));
+    if (d instanceof ArrayBuffer) {
+      d = String.fromCharCode.apply(null, new Uint8Array(d));
+    }
     if (typeof d !== 'string') return;
+    
     if (d.charAt(0) === '0') wx.sendSocketMessage({ data: '40' });
     if (d.charAt(0) === '2') wx.sendSocketMessage({ data: '3' });
     if (d.startsWith('42')) {
-      try { const arr = JSON.parse(d.substring(2)); onEvent(arr[0], arr[1]); } catch(e) {}
+      try {
+        const arr = JSON.parse(d.substring(2));
+        onEvent(arr[0], arr[1]);
+      } catch(e) {
+        console.error('解析失败:', e);
+      }
     }
   });
-  wx.onSocketClose(() => { statusMsg='断开重连...'; render(); setTimeout(connectServer, 3000); });
+
+  wx.onSocketClose(() => {
+    statusMsg = '断开重连...';
+    render();
+    setTimeout(connectServer, 3000);
+  });
 }
 
 function onEvent(ev, pay) {
   console.log('[Event]', ev, pay);
-  if (ev === 'room_created') { 
-    myRoomId=pay.room.id; 
-    mySeatIndex = 0; // 创建者是 0 号位
-    playerCount=pay.room.players.length; 
-    currentState=STATE.LOBBY; 
+  
+  if (ev === 'room_created') {
+    myRoomId = pay.room.id;
+    mySeatIndex = 0;
+    playerCount = pay.room.players.length;
+    currentState = STATE.LOBBY;
   }
-  else if (ev === 'room_joined') { 
-    myRoomId=pay.room.id; 
-    // 加入时获取自己的 seatIndex
-    const me = pay.room.players.find(p => p.id === pay.room.players[pay.room.players.length-1]?.id); 
-    // 这里简单处理：加入者通常是最后一个
-    mySeatIndex = pay.room.players.length - 1; 
-    playerCount=pay.room.players.length; 
-    currentState=STATE.LOBBY; 
+  else if (ev === 'room_joined') {
+    myRoomId = pay.room.id;
+    mySeatIndex = pay.mySeatIndex || 0;
+    playerCount = pay.room.players.length;
+    currentState = STATE.LOBBY;
   }
-  else if (ev === 'player_joined') { if(pay.room) playerCount=pay.room.players.length; }
-  else if (ev === 'game_start') { 
-    gameState=pay.state; 
-    currentState=STATE.GAME; 
-    selectedTapId=null; selectedCardId=null; 
-    statusMsg='游戏开始！你的回合'; 
-    startTurnTimer(); 
+  else if (ev === 'player_joined') {
+    if (pay.room) playerCount = pay.room.players.length;
+  }
+  else if (ev === 'game_start') {
+    gameState = pay.state;
+    currentState = STATE.GAME;
+    selectedCardId = null;
+    statusMsg = '游戏开始！你的回合';
+    startTurnTimer();
   }
   else if (ev === 'state_update') {
-    gameState=pay.state;
-    // 修复：基于 seatIndex 判断
-    if (gameState.currentPlayerIndex === mySeatIndex) { 
-      statusMsg='你的回合：请点击出牌'; 
-      startTurnTimer(); 
-    } else { 
-      statusMsg='对手思考中...'; 
-      stopTurnTimer(); 
+    gameState = pay.state;
+    if (gameState.currentPlayerIndex === mySeatIndex) {
+      statusMsg = '你的回合：点击出牌';
+      startTurnTimer();
+    } else {
+      statusMsg = '对手思考中...';
+      stopTurnTimer();
     }
-    selectedTapId = null; selectedCardId = null;
+    selectedCardId = null;
   }
-  else if (ev === 'yaku_found') { stopTurnTimer(); statusMsg='役达成！'; popupState={show:true,type:'yaku',animProgress:1}; currentState=STATE.POPUP; }
-  else if (ev === 'round_end') { stopTurnTimer(); resultData=pay; currentState=STATE.RESULT; }
-  else if (ev === 'error') { statusMsg='错误：'+pay.message; wx.showToast({title:pay.message,icon:'none'}); }
+  else if (ev === 'yaku_found') {
+    stopTurnTimer();
+    statusMsg = '役达成！';
+    popupState.show = true;
+  }
+  else if (ev === 'round_end') {
+    stopTurnTimer();
+    resultData = pay;
+    currentState = STATE.RESULT;
+  }
+  else if (ev === 'error') {
+    statusMsg = '错误：' + pay.message;
+    wx.showToast({ title: pay.message, icon: 'none' });
+  }
+  
   render();
 }
 
 function startTurnTimer() {
-  stopTurnTimer(); 
+  stopTurnTimer();
   turnTimer = setInterval(() => {
     if (gameState && gameState.currentPlayerIndex === mySeatIndex && gameState.hands[mySeatIndex] && gameState.hands[mySeatIndex].length > 0) {
-      statusMsg = '超时，自动出牌...'; render();
-      // 自动出第一张
+      statusMsg = '超时，自动出牌...';
+      render();
       send('play_card', gameState.hands[mySeatIndex][0]);
     }
     stopTurnTimer();
   }, CONFIG.TURN_TIMEOUT);
 }
 
-function stopTurnTimer() { if(turnTimer) { clearInterval(turnTimer); turnTimer=null; } }
+function stopTurnTimer() {
+  if (turnTimer) {
+    clearInterval(turnTimer);
+    turnTimer = null;
+  }
+}
 
 // ================= 启动 =================
+console.log('[启动] 花札 Hanafuda');
 loadCardImages(() => {
   console.log('[资源] 卡牌加载完成');
   render();
