@@ -266,12 +266,31 @@ function drawGameScene(W, H, cw, ch, gap) {
   // --- 玩家手牌 ---
   const handY = H * 0.72;
   const myHand = gameState.hands[mySeatIndex] || [];
-  const hTotalW = myHand.length * (cw + gap);
+  
+  // 动态调整手牌布局：如果牌太多，缩小间距或卡牌尺寸
+  let handCardW = cw;
+  let handGap = gap;
+  const maxHandWidth = W * 0.95; // 手牌最大宽度（留 5% 边距）
+  const handTotalW = myHand.length * (cw + gap);
+  
+  if (handTotalW > maxHandWidth) {
+    // 方案 1：缩小间距
+    handGap = (maxHandWidth - myHand.length * cw) / (myHand.length - 1);
+    if (handGap < 2) {
+      // 方案 2：间距太小，缩小卡牌
+      handCardW = (maxHandWidth - gap * (myHand.length - 1)) / myHand.length;
+      handGap = gap;
+    }
+  }
+  
+  const hTotalW = myHand.length * (handCardW + handGap);
   const hStart = (W - hTotalW) / 2;
   myHand.forEach((id, i) => {
     const isSel = (id === selectedCardId);
     const y = isSel ? handY - 12 : handY;
-    drawCardIMG(hStart + i * (cw + gap), y, id, cw, ch, isSel);
+    // 卡牌高度按比例缩放
+    const handCardH = handCardW * (ch / cw);
+    drawCardIMG(hStart + i * (handCardW + handGap), y, id, handCardW, handCardH, isSel);
   });
 
   // --- 状态提示 ---
@@ -486,15 +505,36 @@ wx.onTouchStart(e => {
     const cw = 50 * scale, ch = 80 * scale, gap = 5 * scale;
     const handY = H * 0.72;
     const myHand = gameState.hands[mySeatIndex] || [];
-    const hTotalW = myHand.length * (cw + gap);
+    
+    // 动态计算手牌布局（与渲染逻辑一致）
+    let handCardW = cw;
+    let handGap = gap;
+    const maxHandWidth = W * 0.95;
+    const handTotalW = myHand.length * (cw + gap);
+    
+    if (handTotalW > maxHandWidth) {
+      handGap = (maxHandWidth - myHand.length * cw) / (myHand.length - 1);
+      if (handGap < 2) {
+        handCardW = (maxHandWidth - gap * (myHand.length - 1)) / myHand.length;
+        handGap = gap;
+      }
+    }
+    
+    const hTotalW = myHand.length * (handCardW + handGap);
     const hStart = (W - hTotalW) / 2;
+    
+    // 从后往前遍历（先检测选中的牌）
     for (let i = myHand.length - 1; i >= 0; i--) {
       const id = myHand[i];
       const isSel = (id === selectedCardId);
-      const cardX = hStart + i * (cw + gap);
+      const cardX = hStart + i * (handCardW + handGap);
       const cardY = isSel ? handY - 12 : handY;
-      if (x > cardX && x < cardX + cw && y > cardY && y < cardY + ch) {
-        handleTap(id, cardX, cardY, cw, ch, gap, handY); return;
+      const cardH = handCardW * (ch / cw);
+      // 扩大点击区域（方便手指点击）
+      const hitPadding = 5;
+      if (x > cardX - hitPadding && x < cardX + handCardW + hitPadding && 
+          y > cardY - hitPadding && y < cardY + cardH + hitPadding) {
+        handleTap(id, cardX, cardY, handCardW, cardH, handGap, handY); return;
       }
     }
   }
@@ -517,7 +557,9 @@ function handleTap(id, fromX, fromY, cw, ch, gap, handY) {
     send('play_card', id);
     selectedCardId = null;
   } else {
-    selectedCardId = id; render();
+    // 选中效果
+    selectedCardId = id; 
+    render();
   }
 }
 
