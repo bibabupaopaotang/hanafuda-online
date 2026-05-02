@@ -287,20 +287,56 @@ function drawResultScreen(W, H) {
   ctx.lineWidth = 3;
   roundRect(W/2 - pw/2, H/2 - ph/2, pw, ph, 15);
   ctx.stroke();
-  drawText('🏁 本局结束', W/2, H/2 - ph * 0.3, 26, '#333');
+  
+  // 标题
+  const gameOver = resultData?.gameOver;
+  drawText(gameOver ? '🏆 游戏结束' : '🏁 本局结束', W/2, H/2 - ph * 0.35, 28, gameOver ? '#FFD700' : '#333');
+  
   if (resultData) {
     const s = resultData.roundScores;
-    drawText('本局：' + s[0] + ' - ' + s[1], W/2, H/2 - ph * 0.1, 18, '#555');
-    drawText('累计：' + resultData.totalScores[0] + ' - ' + resultData.totalScores[1], W/2, H/2 + ph * 0.05, 22, '#000');
-    if (resultData.gameOver) drawText('游戏结束！', W/2, H/2 + ph * 0.2, 20, '#D32F2F');
+    drawText('本局得分：' + s[0] + ' - ' + s[1], W/2, H/2 - ph * 0.15, 20, '#555');
+    drawText('累计积分：' + resultData.totalScores[0] + ' - ' + resultData.totalScores[1], W/2, H/2 - ph * 0.02, 24, '#000');
+    
+    if (gameOver) {
+      // 显示获胜者
+      const winnerIdx = resultData.totalScores[0] >= resultData.totalScores[1] ? 0 : 1;
+      const winnerName = winnerIdx === mySeatIndex ? '你' : '对手';
+      drawText(winnerName + '获胜！', W/2, H/2 + ph * 0.12, 26, '#D32F2F');
+      drawText('目标分数：7 分', W/2, H/2 + ph * 0.22, 16, '#888');
+    } else {
+      drawText('先达到 7 分者获胜', W/2, H/2 + ph * 0.18, 16, '#888');
+    }
   }
-  const bw = pw * 0.5, bh = ph * 0.12;
-  drawBtn('返回大厅', W/2 - bw/2, H/2 + ph * 0.35, bw, bh, '#4CAF50', () => {
-    currentState = STATE.LOBBY;
-    gameState = null;
-    resultData = null;
-    render();
-  });
+  
+  // 按钮
+  const bw = pw * 0.45, bh = ph * 0.12;
+  if (gameOver) {
+    // 游戏结束：显示"再来一局"和"返回大厅"
+    drawBtn('🔄 再来一局', W/2 - bw - 5, H/2 + ph * 0.35, bw, bh, '#FF9800', () => {
+      statusMsg = '请求新游戏...';
+      render();
+      send('start_game');
+    });
+    drawBtn('🏠 返回大厅', W/2 + 5, H/2 + ph * 0.35, bw, bh, '#4CAF50', () => {
+      currentState = STATE.LOBBY;
+      gameState = null;
+      resultData = null;
+      render();
+    });
+  } else {
+    // 局间结算：显示"下一局"和"返回大厅"
+    drawBtn('▶️ 下一局', W/2 - bw - 5, H/2 + ph * 0.35, bw, bh, '#2196F3', () => {
+      statusMsg = '请求下一局...';
+      render();
+      send('start_game');
+    });
+    drawBtn('🏠 返回大厅', W/2 + 5, H/2 + ph * 0.35, bw, bh, '#9E9E9E', () => {
+      currentState = STATE.LOBBY;
+      gameState = null;
+      resultData = null;
+      render();
+    });
+  }
 }
 
 // ================= 界面：弹窗 =================
@@ -537,6 +573,7 @@ function onEvent(ev, pay) {
   }
   else if (ev === 'player_joined') { if (pay.room) playerCount = pay.room.players.length; }
   else if (ev === 'game_start') {
+    console.log('[游戏] 游戏开始');
     gameState = pay.state;
     currentState = STATE.GAME;
     selectedCardId = null;
@@ -563,6 +600,15 @@ function onEvent(ev, pay) {
     stopTurnTimer();
     resultData = pay;
     currentState = STATE.RESULT;
+    console.log('[结算] 本局结束，游戏结束：', pay.gameOver);
+  }
+  else if (ev === 'game_end') {
+    console.log('[游戏结束] 获胜者：', pay.winner?.nickname, '比分：', pay.totalScores);
+    // 游戏结束，可以在结算界面显示更详细的信息
+    if (resultData) {
+      resultData.gameOver = true;
+      resultData.winner = pay.winner;
+    }
   }
   else if (ev === 'error') {
     statusMsg = '错误：' + pay.message;
