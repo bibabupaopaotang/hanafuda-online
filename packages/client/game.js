@@ -1,12 +1,12 @@
 /**
- * 花札 Hanafuda - 稳定版
+ * 花札 Hanafuda - 完整版
+ * 修复：布局、积分显示、玩法逻辑
  */
 
 const canvas = wx.createCanvas();
 const ctx = canvas.getContext('2d');
 
 const CONFIG = {
-  // 通过 Nginx 80 端口连接
   SERVER_URL: 'ws://47.253.96.212/socket.io/?EIO=4&transport=websocket',
   TURN_TIMEOUT: 15000
 };
@@ -60,7 +60,6 @@ function loadCardImages(callback) {
   cardBackImg.onerror = () => { loaded++; };
   cardBackImg.src = './assets/cards/card_back.png';
   
-  // 5 秒超时强制开始
   setTimeout(() => {
     if (callback && loaded < total) {
       console.warn('[资源] 图片加载超时，强制开始');
@@ -75,11 +74,12 @@ function render() {
   ctx.clearRect(0, 0, W, H);
   _buttons = [];
 
+  // 动态卡牌尺寸
   const baseW = Math.min(W, 400);
   const scale = baseW / 375;
-  const CARD_W = 50 * scale;
-  const CARD_H = 80 * scale;
-  const CARD_GAP = 6 * scale;
+  const CARD_W = 45 * scale;
+  const CARD_H = 72 * scale;
+  const CARD_GAP = 4 * scale;
 
   if (currentState === STATE.MENU) drawMenu(W, H);
   else if (currentState === STATE.LOBBY) drawLobby(W, H);
@@ -152,7 +152,6 @@ function drawMenu(W, H) {
   drawBtn('创建房间', W/2 - btnW/2, H * 0.45, btnW, btnH, '#4CAF50', () => {
     console.log('[按钮] 创建房间被点击');
     if (!socketConnected) {
-      console.warn('[Socket] 未连接，等待中...');
       wx.showToast({ title: '连接中...', icon: 'loading' });
       statusMsg = '连接中...';
       render();
@@ -189,14 +188,31 @@ function drawGameScene(W, H, cw, ch, gap) {
     return;
   }
 
+  // --- 顶部信息栏 (积分) ---
+  const infoH = H * 0.08;
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(0, 0, W, infoH);
+  
+  // 对手信息
   const oppIdx = (mySeatIndex + 1) % 2;
+  drawText('对手', W * 0.15, infoH * 0.6, 14, '#aaa');
+  drawText('积分：' + (gameState.totalScores?.[oppIdx] || 0), W * 0.15, infoH * 0.9, 16, '#ffcc00');
+  
+  // 我的积分
+  drawText('我的积分：' + (gameState.totalScores?.[mySeatIndex] || 0), W * 0.85, infoH * 0.9, 16, '#ffcc00');
+
+  // --- 对手手牌 (顶部) ---
   const oppHand = gameState.hands[oppIdx] || [];
-  const oppStart = (W - oppHand.length * (cw * 0.7 + 3)) / 2;
+  const oppCardW = cw * 0.7;
+  const oppTotalW = oppHand.length * (oppCardW + 2);
+  const oppStart = (W - oppTotalW) / 2;
   for (let i = 0; i < oppHand.length; i++) {
-    drawCardImg(oppStart + i * (cw * 0.7 + 3), H * 0.08, null, cw * 0.7, ch * 0.7);
+    drawCardImg(oppStart + i * (oppCardW + 2), H * 0.1, null, oppCardW, ch * 0.7);
   }
 
-  const fieldY = H * 0.25, fieldH = H * 0.35;
+  // --- 场牌区 (中间) ---
+  const fieldY = H * 0.22;
+  const fieldH = H * 0.32;
   ctx.fillStyle = '#082d15';
   roundRect(W * 0.05, fieldY, W * 0.9, fieldH, 10);
   ctx.fill();
@@ -204,44 +220,58 @@ function drawGameScene(W, H, cw, ch, gap) {
   ctx.lineWidth = 2;
   roundRect(W * 0.05, fieldY, W * 0.9, fieldH, 10);
   ctx.stroke();
-  drawText('场牌区', W/2, fieldY + fieldH * 0.06, 16, '#558855');
+  drawText('场牌区', W/2, fieldY + fieldH * 0.06, 14, '#558855');
 
   const field = gameState.field || [];
-  const fStart = (W - field.length * (cw + gap)) / 2;
-  field.forEach((id, i) => {
-    drawCardIMG(fStart + i * (cw + gap), fieldY + fieldH * 0.15, id, cw, ch);
+  // 自适应场牌布局
+  const maxPerRow = Math.floor((W * 0.85) / (cw + gap));
+  const fieldCards = field.slice(0, maxPerRow * 2); // 最多显示两排
+  const rows = Math.ceil(fieldCards.length / maxPerRow) || 1;
+  const rowH = fieldH * 0.7 / rows;
+  
+  fieldCards.forEach((id, i) => {
+    const row = Math.floor(i / maxPerRow);
+    const col = i % maxPerRow;
+    const rowStart = fieldY + fieldH * 0.15 + row * (ch * 0.35 + 2);
+    const colStart = (W - maxPerRow * (cw + gap)) / 2 + col * (cw + gap);
+    drawCardIMG(colStart, rowStart, id, cw, ch * 0.35);
   });
 
-  const deckX = W * 0.82, deckY = fieldY + fieldH * 0.1;
+  // --- 山札 (右侧) ---
+  const deckX = W * 0.82;
+  const deckY = fieldY + 10;
   ctx.fillStyle = '#5D4037';
   roundRect(deckX, deckY, cw, ch, 6);
   ctx.fill();
-  drawText('山札', deckX + cw/2, deckY + ch * 0.25, 12, '#fff');
-  drawText(String(gameState.deck.length), deckX + cw/2, deckY + ch * 0.45, 14, '#fff');
+  drawText('山札', deckX + cw/2, deckY + ch * 0.25, 10, '#fff');
+  drawText(String(gameState.deck.length), deckX + cw/2, deckY + ch * 0.45, 12, '#fff');
 
+  // --- 回合指示器 (左上角) ---
   drawTurnIndicator(W, H);
 
-  const handY = H * 0.65;
+  // --- 玩家手牌 (底部) ---
+  const handY = H * 0.68;
   const myHand = gameState.hands[mySeatIndex] || [];
   const hTotalW = myHand.length * (cw + gap);
   const hStart = (W - hTotalW) / 2;
   myHand.forEach((id, i) => {
     const isSel = (id === selectedCardId);
-    const y = isSel ? handY - 15 : handY;
+    const y = isSel ? handY - 10 : handY;
     drawCardIMG(hStart + i * (cw + gap), y, id, cw, ch, isSel);
   });
 
-  drawText(statusMsg, W/2, H - 20, 18, '#ffcc00');
+  // --- 状态提示 ---
+  drawText(statusMsg, W/2, H - 15, 16, '#ffcc00');
 }
 
 function drawTurnIndicator(W, H) {
   if (!gameState) return;
   const isMyTurn = (gameState.currentPlayerIndex === mySeatIndex);
-  const x = W * 0.72, y = H * 0.03, w = W * 0.25, h = 35;
+  const x = W * 0.05, y = H * 0.05, w = W * 0.25, h = 30;
   ctx.fillStyle = isMyTurn ? 'rgba(76,175,80,0.85)' : 'rgba(255,152,0,0.85)';
   roundRect(x, y, w, h, 8);
   ctx.fill();
-  drawText(isMyTurn ? '✋ 你的回合' : '⏳ 对手回合', x + w/2, y + h * 0.65, 14, '#fff');
+  drawText(isMyTurn ? '✋ 你的回合' : '⏳ 对手', x + w/2, y + h * 0.6, 13, '#fff');
 }
 
 // ================= 界面：结算 =================
@@ -376,8 +406,8 @@ wx.onTouchStart(e => {
     const W = canvas.width, H = canvas.height;
     const baseW = Math.min(W, 400);
     const scale = baseW / 375;
-    const cw = 50 * scale, ch = 80 * scale, gap = 6 * scale;
-    const handY = H * 0.65;
+    const cw = 45 * scale, ch = 72 * scale, gap = 4 * scale;
+    const handY = H * 0.68;
     const myHand = gameState.hands[mySeatIndex] || [];
     const hTotalW = myHand.length * (cw + gap);
     const hStart = (W - hTotalW) / 2;
@@ -385,7 +415,7 @@ wx.onTouchStart(e => {
       const id = myHand[i];
       const isSel = (id === selectedCardId);
       const cardX = hStart + i * (cw + gap);
-      const cardY = isSel ? handY - 15 : handY;
+      const cardY = isSel ? handY - 10 : handY;
       if (x > cardX && x < cardX + cw && y > cardY && y < cardY + ch) {
         handleTap(id, cardX, cardY, cw, ch, gap, handY); return;
       }
@@ -399,11 +429,13 @@ function handleTap(id, fromX, fromY, cw, ch, gap, handY) {
   }
   if (selectedCardId === id) {
     const W = canvas.width, H = canvas.height;
-    const fieldY = H * 0.25;
+    const fieldY = H * 0.22;
     const field = gameState.field || [];
-    const fStart = (W - (field.length + 1) * (cw + gap)) / 2;
-    const toX = fStart + field.length * (cw + gap);
-    const toY = fieldY + H * 0.15;
+    const maxPerRow = Math.floor((W * 0.85) / (cw + gap));
+    const rows = Math.ceil(field.length / maxPerRow) || 1;
+    const fStart = (W - maxPerRow * (cw + gap)) / 2;
+    const toX = fStart + (field.length % maxPerRow) * (cw + gap);
+    const toY = fieldY + 10 + Math.floor(field.length / maxPerRow) * (ch * 0.35 + 2);
     playCardAnim(id, fromX, fromY, toX, toY);
     statusMsg = '出牌中...'; render();
     send('play_card', id);
@@ -426,7 +458,7 @@ function promptJoin() {
 
 function send(ev, data) {
   if (!socketConnected) {
-    console.warn('[Socket] 连接未建立，消息已丢弃:', ev);
+    console.warn('[Socket] 连接未建立:', ev);
     wx.showToast({ title: '连接中...', icon: 'loading' });
     return;
   }
