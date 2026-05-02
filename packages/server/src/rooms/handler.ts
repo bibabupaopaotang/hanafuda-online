@@ -113,7 +113,13 @@ export function setupSocketHandlers(io: Server): void {
           io.to(currentRoomId).emit('state_update', { action: 'play_card', state: serializeState(yakuResult.state) });
           const currentId = state.players[state.currentPlayerIndex]?.id;
           const targetSocket = [...io.sockets.sockets.values()].find(s => s.id === currentId);
-          targetSocket?.emit('yaku_found', { yaku: yakuResult.state._currentYaku });
+          // 单独发送役列表（不要从 state 取，因为_serializeState 会移除_currentYaku）
+          targetSocket?.emit('yaku_found', { 
+            yaku: yakuResult.state._currentYaku?.map((y: any) => ({ 
+              label: y.label, 
+              points: y.points 
+            }))
+          });
         } else {
           const nextState = nextPlayer(yakuResult.state);
           updateGameState(currentRoomId!, nextState);
