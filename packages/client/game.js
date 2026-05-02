@@ -188,18 +188,38 @@ function drawGameScene(W, H, cw, ch, gap) {
     return;
   }
 
-  // --- 顶部信息栏 (积分) ---
-  const infoH = H * 0.08;
-  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  // --- 顶部信息栏 (积分 + 收集区) ---
+  const infoH = H * 0.12;
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
   ctx.fillRect(0, 0, W, infoH);
   
   // 对手信息
   const oppIdx = (mySeatIndex + 1) % 2;
-  drawText('对手', W * 0.15, infoH * 0.6, 14, '#aaa');
-  drawText('积分：' + (gameState.totalScores?.[oppIdx] || 0), W * 0.15, infoH * 0.9, 16, '#ffcc00');
+  drawText('对手', W * 0.1, infoH * 0.3, 14, '#aaa');
+  drawText('积分：' + (gameState.totalScores?.[oppIdx] || 0), W * 0.1, infoH * 0.55, 16, '#ffcc00');
+  
+  // 对手收集区（简略显示张数）
+  const oppCaptured = gameState.captured?.[oppIdx]?.length || 0;
+  drawText('收集：' + oppCaptured + '张', W * 0.1, infoH * 0.8, 12, '#888');
   
   // 我的积分
-  drawText('我的积分：' + (gameState.totalScores?.[mySeatIndex] || 0), W * 0.85, infoH * 0.9, 16, '#ffcc00');
+  drawText('我的积分：' + (gameState.totalScores?.[mySeatIndex] || 0), W * 0.75, infoH * 0.55, 16, '#ffcc00');
+  
+  // 我的收集区（显示最近几张）
+  const myCaptured = gameState.captured?.[mySeatIndex] || [];
+  drawText('收集：' + myCaptured.length + '张', W * 0.75, infoH * 0.8, 12, '#888');
+  
+  // 显示收集的牌（缩略图）
+  const recentCards = myCaptured.slice(-5);
+  recentCards.forEach((id, i) => {
+    const img = cardImages[id];
+    if (img) {
+      const thumbW = 20, thumbH = 32;
+      const thumbX = W * 0.82 + i * (thumbW + 2);
+      const thumbY = infoH * 0.6;
+      ctx.drawImage(img, thumbX, thumbY, thumbW, thumbH);
+    }
+  });
 
   // --- 对手手牌 (顶部) ---
   const oppHand = gameState.hands[oppIdx] || [];
@@ -592,23 +612,31 @@ function onEvent(ev, pay) {
     selectedCardId = null;
   }
   else if (ev === 'yaku_found') {
+    console.log('[役达成] 弹出对话框');
     stopTurnTimer();
     statusMsg = '役达成！';
     popupState.show = true;
+    render();
   }
   else if (ev === 'round_end') {
+    console.log('[结算] 本局结束', pay);
     stopTurnTimer();
     resultData = pay;
+    // 确保 totalScores 正确传递
+    if (pay.state && pay.state.totalScores) {
+      resultData.totalScores = pay.state.totalScores;
+    }
     currentState = STATE.RESULT;
-    console.log('[结算] 本局结束，游戏结束：', pay.gameOver);
+    render();
   }
   else if (ev === 'game_end') {
     console.log('[游戏结束] 获胜者：', pay.winner?.nickname, '比分：', pay.totalScores);
-    // 游戏结束，可以在结算界面显示更详细的信息
     if (resultData) {
       resultData.gameOver = true;
       resultData.winner = pay.winner;
+      resultData.totalScores = pay.totalScores;
     }
+    render();
   }
   else if (ev === 'error') {
     statusMsg = '错误：' + pay.message;
