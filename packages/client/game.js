@@ -50,15 +50,30 @@ function loadCardImages(callback) {
   for (let i = 0; i < 48; i++) {
     const img = wx.createImage();
     img.onload = onCardLoad;
-    img.onerror = () => { console.error('加载失败：card_' + i); loaded++; };
+    img.onerror = () => { 
+      console.warn('图片加载失败：card_' + i + '，使用色块代替');
+      loaded++; 
+    };
+    // 尝试加载，失败也不阻塞
     img.src = './assets/cards/card_' + String(i).padStart(2, '0') + '.png';
     cardImages[i] = img;
   }
   
   cardBackImg = wx.createImage();
   cardBackImg.onload = onCardLoad;
-  cardBackImg.onerror = () => { console.error('加载失败：card_back'); loaded++; };
+  cardBackImg.onerror = () => { 
+    console.warn('图片加载失败：card_back，使用色块代替');
+    loaded++; 
+  };
   cardBackImg.src = './assets/cards/card_back.png';
+  
+  // 5 秒后强制开始（即使图片没加载完）
+  setTimeout(() => {
+    if (callback && loaded < total) {
+      console.warn('[资源] 图片加载超时，强制开始');
+      callback();
+    }
+  }, 5000);
 }
 
 // ================= 渲染 =================
@@ -153,6 +168,7 @@ function drawMenu(W, H) {
   const btnH = 50;
   
   drawBtn('创建房间', W/2 - btnW/2, H * 0.45, btnW, btnH, '#4CAF50', () => {
+    console.log('[按钮] 创建房间被点击');
     statusMsg = '创建中...';
     render();
     send('create_room');
@@ -536,21 +552,31 @@ function promptJoin() {
 function send(ev, data) {
   const payload = data !== undefined ? JSON.stringify(data) : '';
   const msg = payload ? '42["' + ev + '",' + payload + ']' : '42["' + ev + '"]';
-  wx.sendSocketMessage({ data: msg });
+  console.log('[Socket] 发送消息:', ev, msg);
+  wx.sendSocketMessage({
+    data: msg,
+    success: () => console.log('[Socket] 发送成功:', ev),
+    fail: (err) => console.error('[Socket] 发送失败:', ev, err)
+  });
 }
 
 // ================= 网络 =================
 function connectServer() {
+  console.log('[Socket] 开始连接:', CONFIG.SERVER_URL);
   wx.connectSocket({
     url: CONFIG.SERVER_URL,
-    fail: () => {
+    fail: (err) => {
+      console.error('[Socket] 连接失败:', err);
       statusMsg = '连接失败';
       render();
+    },
+    success: () => {
+      console.log('[Socket] 连接请求已发送');
     }
   });
 
   wx.onSocketOpen(() => {
-    console.log('[Socket] 已连接');
+    console.log('[Socket] ✅ 已连接');
   });
 
   wx.onSocketMessage(res => {
@@ -580,13 +606,16 @@ function connectServer() {
 }
 
 function onEvent(ev, pay) {
-  console.log('[Event]', ev, pay);
+  console.log('[Event] 收到事件:', ev, pay);
   
   if (ev === 'room_created') {
+    console.log('[房间] 创建成功，房间号:', pay.room.id);
     myRoomId = pay.room.id;
     mySeatIndex = 0;
     playerCount = pay.room.players.length;
     currentState = STATE.LOBBY;
+    statusMsg = '房间已创建';
+    console.log('[状态] 切换到 LOBBY');
   }
   else if (ev === 'room_joined') {
     myRoomId = pay.room.id;
