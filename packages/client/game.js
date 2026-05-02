@@ -29,6 +29,18 @@ let socketConnected = false;
 let animatingCard = null;
 let popupState = { show: false, yakuList: [] };
 
+// 役提示
+let yakuProgress = {
+  lights: 0,      // 光牌数量
+  akaStrips: 0,   // 赤短进度 [0/3]
+  aoStrips: 0,    // 青短进度 [0/3]
+  inoshikacho: [], // 猪鹿蝶收集 [6,7,10]
+  strips: 0,      // 短册总数
+  seeds: 0,       // 种牌总数
+  waste: 0,       // カ斯总数
+  sake: []        // 酒相关 [3 月光，8 月光，9 月杯]
+};
+
 // UI
 let _buttons = [];
 let cardImages = {};
@@ -146,17 +158,23 @@ function roundRect(x, y, w, h, r) {
 // ================= 界面：菜单 =================
 function drawMenu(W, H) {
   drawBg();
-  drawText('🌸 花札 Hanafuda 🌸', W/2, H * 0.3, 32, '#fff');
+  drawText('🌸 花札 Hanafuda 🌸', W/2, H * 0.28, 32, '#fff');
   const btnW = W * 0.6, btnH = 50;
-  drawBtn('创建房间', W/2 - btnW/2, H * 0.45, btnW, btnH, '#4CAF50', () => {
+  drawBtn('创建房间', W/2 - btnW/2, H * 0.42, btnW, btnH, '#4CAF50', () => {
     if (!socketConnected) {
       wx.showToast({ title: '连接中...', icon: 'loading' });
       return;
     }
     send('create_room');
   });
-  drawBtn('加入房间', W/2 - btnW/2, H * 0.58, btnW, btnH, '#2196F3', () => promptJoin());
-  drawText(statusMsg, W/2, H * 0.75, 16, '#aaa');
+  drawBtn('加入房间', W/2 - btnW/2, H * 0.53, btnW, btnH, '#2196F3', () => promptJoin());
+  drawBtn('📋 役说明', W/2 - btnW/2, H * 0.64, btnW, btnH, '#9C27B0', () => {
+    currentState = STATE.POPUP;
+    popupState.show = true;
+    popupState.yakuHelp = true;
+    render();
+  });
+  drawText(statusMsg, W/2, H * 0.78, 16, '#aaa');
 }
 
 // ================= 界面：大厅 =================
@@ -295,6 +313,9 @@ function drawGameScene(W, H, cw, ch, gap) {
 
   // --- 状态提示 ---
   drawText(statusMsg, W/2, H - 18, 16, '#ffcc00');
+  
+  // --- 役进度提示（右侧） ---
+  drawYakuHints(W, H, H * 0.18);
 }
 
 function drawTurnIndicator(W, H) {
@@ -310,6 +331,12 @@ function drawTurnIndicator(W, H) {
 // ================= 界面：弹窗 =================
 function drawPopup(W, H) {
   if (!popupState.show) return;
+  
+  // 役说明帮助界面
+  if (popupState.yakuHelp) {
+    drawYakuHelp(W, H);
+    return;
+  }
   
   // 半透明遮罩
   ctx.fillStyle = 'rgba(0,0,0,0.85)';
@@ -359,6 +386,58 @@ function drawPopup(W, H) {
     send('end_round');
     statusMsg = '结算中...';
     currentState = STATE.GAME;
+    render();
+  });
+}
+
+// ================= 界面：役说明帮助 =================
+function drawYakuHelp(W, H) {
+  ctx.fillStyle = 'rgba(0,0,0,0.9)';
+  ctx.fillRect(0, 0, W, H);
+  
+  const pw = Math.min(W * 0.9, 400);
+  const ph = H * 0.75;
+  const px = W/2 - pw/2;
+  const py = H/2 - ph/2;
+  
+  // 背景
+  ctx.fillStyle = '#fff';
+  roundRect(px, py, pw, ph, 15);
+  ctx.fill();
+  
+  // 标题
+  drawText('📋 役说明', W/2, py + 25, 24, '#333');
+  drawText('达成役获得分数，先达到 7 分者获胜', W/2, py + 50, 14, '#888');
+  
+  // 役列表（可滚动区域）
+  const scrollY = py + 70;
+  const lineHeight = 18;
+  let y = scrollY;
+  
+  const yakuList = [
+    { title: '光牌役', items: ['五光 (5 张): 10 分', '四光 (4 张): 8 分', '雨四光 (含柳): 7 分', '三光 (3 张): 6 分'] },
+    { title: '短册役', items: ['赤短 (1+2+3 月): 5 分', '青短 (6+7+9 月): 5 分', '短册×5: 1 分', '短册×6: 2 分', '短册×7: 3 分', '短册×8: 4 分'] },
+    { title: '种牌役', items: ['猪鹿蝶 (6+7+10 月): 5 分', '种×5: 1 分', '种×6: 2 分', '种×7: 3 分', '种×8: 4 分'] },
+    { title: 'カ斯役', items: ['カ斯×10: 1 分', '每多 1 张 +1 分'] },
+    { title: '特殊役', items: ['呑み (3+8 月 + 杯): 4 分', '花见酒 (3 月 + 杯): 3 分', '月见酒 (8 月 + 杯): 3 分'] },
+  ];
+  
+  yakuList.forEach(section => {
+    drawText(section.title, px + 15, y, 16, '#D32F2F');
+    y += lineHeight;
+    section.items.forEach(item => {
+      drawText(item, px + 25, y, 13, '#555');
+      y += lineHeight - 2;
+    });
+    y += 8;
+  });
+  
+  // 关闭按钮
+  const bw = pw * 0.4, bh = 45;
+  drawBtn('返回', W/2 - bw/2, py + ph - 60, bw, bh, '#4CAF50', () => {
+    popupState.show = false;
+    popupState.yakuHelp = false;
+    currentState = STATE.MENU;
     render();
   });
 }
@@ -474,6 +553,26 @@ wx.onTouchStart(e => {
 
   if (currentState === STATE.POPUP) {
     const W = canvas.width, H = canvas.height;
+    
+    // 役说明帮助界面
+    if (popupState.yakuHelp) {
+      const pw = Math.min(W * 0.9, 400);
+      const ph = H * 0.75;
+      const px = W/2 - pw/2;
+      const py = H/2 - ph/2;
+      const bw = pw * 0.4, bh = 45;
+      
+      if (x > W/2 - bw/2 && x < W/2 + bw/2 && y > py + ph - 60 && y < py + ph - 60 + bh) {
+        popupState.show = false;
+        popupState.yakuHelp = false;
+        currentState = STATE.MENU;
+        render();
+        return;
+      }
+      return;
+    }
+    
+    // 役达成弹窗
     const pw = Math.min(W * 0.85, 340);
     const ph = H * 0.45;
     const px = W/2 - pw/2;
@@ -669,6 +768,8 @@ function onEvent(ev, pay) {
       stopTurnTimer();
     }
     selectedCardId = null;
+    // 更新役进度提示
+    updateYakuProgress();
   }
   else if (ev === 'yaku_found') {
     console.log('[役达成] 显示弹窗');
@@ -716,6 +817,134 @@ function startTurnTimer() {
 }
 
 function stopTurnTimer() { if (turnTimer) { clearInterval(turnTimer); turnTimer = null; } }
+
+// ================= 役进度提示 =================
+function updateYakuProgress() {
+  if (!gameState) return;
+  
+  const captured = gameState.captured?.[mySeatIndex] || [];
+  
+  // 重置进度
+  yakuProgress = {
+    lights: 0,
+    akaStrips: 0,
+    aoStrips: 0,
+    inoshikacho: [],
+    strips: 0,
+    seeds: 0,
+    waste: 0,
+    sake: []
+  };
+  
+  // 遍历收集的牌
+  captured.forEach(cardId => {
+    const month = Math.floor(cardId / 4) + 1;
+    const category = cardId % 4; // 0:光，1:短，2:种，3:カ
+    
+    // 光牌
+    if (category === 0) {
+      yakuProgress.lights++;
+      // 酒相关
+      if (month === 3 && !yakuProgress.sake.includes(3)) yakuProgress.sake.push(3);
+      if (month === 8 && !yakuProgress.sake.includes(8)) yakuProgress.sake.push(8);
+    }
+    
+    // 短册
+    if (category === 1) {
+      yakuProgress.strips++;
+      if ([1, 2, 3].includes(month)) yakuProgress.akaStrips++;
+      if ([6, 7, 9].includes(month)) yakuProgress.aoStrips++;
+    }
+    
+    // 种牌
+    if (category === 2) {
+      yakuProgress.seeds++;
+      if ([6, 7, 10].includes(month) && !yakuProgress.inoshikacho.includes(month)) {
+        yakuProgress.inoshikacho.push(month);
+      }
+      // 酒相关（9 月杯）
+      if (month === 9 && !yakuProgress.sake.includes(9)) yakuProgress.sake.push(9);
+    }
+    
+    // カ斯
+    if (category === 3) {
+      yakuProgress.waste++;
+    }
+  });
+}
+
+function getYakuHints() {
+  const hints = [];
+  
+  // 光牌提示
+  if (yakuProgress.lights > 0) {
+    hints.push(`光牌：${yakuProgress.lights}/5 张`);
+    if (yakuProgress.lights >= 3) hints.push('  → 再收集' + (3 - yakuProgress.lights) + '张达成三光！');
+  }
+  
+  // 赤短提示
+  if (yakuProgress.akaStrips > 0) {
+    hints.push(`赤短：${yakuProgress.akaStrips}/3 张`);
+    if (yakuProgress.akaStrips >= 2) hints.push('  → 再收集' + (3 - yakuProgress.akaStrips) + '张达成赤短！');
+  }
+  
+  // 青短提示
+  if (yakuProgress.aoStrips > 0) {
+    hints.push(`青短：${yakuProgress.aoStrips}/3 张`);
+    if (yakuProgress.aoStrips >= 2) hints.push('  → 再收集' + (3 - yakuProgress.aoStrips) + '张达成青短！');
+  }
+  
+  // 猪鹿蝶提示
+  if (yakuProgress.inoshikacho.length > 0) {
+    const animals = { 6: '蝶', 7: '猪', 10: '鹿' };
+    const collected = yakuProgress.inoshikacho.map(m => animals[m]).join(',');
+    hints.push(`猪鹿蝶：${collected} (${yakuProgress.inoshikacho.length}/3)`);
+    if (yakuProgress.inoshikacho.length >= 2) hints.push('  → 再收集' + (3 - yakuProgress.inoshikacho.length) + '张达成猪鹿蝶！');
+  }
+  
+  // 酒提示
+  if (yakuProgress.sake.length > 0) {
+    const sakeNames = { 3: '桜光', 8: '芒光', 9: '杯' };
+    const collected = yakuProgress.sake.map(m => sakeNames[m]).join(',');
+    hints.push(`酒：${collected}`);
+    if (yakuProgress.sake.includes(9)) {
+      if (!yakuProgress.sake.includes(3)) hints.push('  → 收集 3 月桜光达成花见酒！');
+      if (!yakuProgress.sake.includes(8)) hints.push('  → 收集 8 月芒光达成月见酒！');
+    }
+  }
+  
+  // 累计役提示
+  if (yakuProgress.strips >= 4) hints.push(`短册：${yakuProgress.strips}张（5 张起有分）`);
+  if (yakuProgress.seeds >= 4) hints.push(`种牌：${yakuProgress.seeds}张（5 张起有分）`);
+  if (yakuProgress.waste >= 8) hints.push(`カ斯：${yakuProgress.waste}张（10 张起有分）`);
+  
+  return hints;
+}
+
+function drawYakuHints(W, H, startY) {
+  const hints = getYakuHints();
+  if (hints.length === 0) return;
+  
+  const boxX = W * 0.05;
+  const boxY = startY;
+  const boxW = W * 0.35;
+  const boxH = 25 + hints.length * 18;
+  
+  // 背景
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  roundRect(boxX, boxY, boxW, boxH, 8);
+  ctx.fill();
+  
+  // 标题
+  drawText('🎯 役进度', boxX + boxW / 2, boxY + 18, 14, '#FFD700');
+  
+  // 提示列表
+  hints.forEach((hint, i) => {
+    const color = hint.includes('→') ? '#ffcc00' : '#aaa';
+    const fontSize = hint.includes('→') ? 12 : 13;
+    drawText(hint, boxX + 10, boxY + 38 + i * 18, fontSize, color);
+  });
+}
 
 // ================= 启动 =================
 console.log('[启动] 花札 Hanafuda');
