@@ -23,6 +23,7 @@ let resultData = null;
 let statusMsg = '初始化中...';
 let turnTimer = null;
 let selectedCardId = null;
+let socketConnected = false;
 
 // 动画
 let animatingCard = null;
@@ -169,6 +170,13 @@ function drawMenu(W, H) {
   
   drawBtn('创建房间', W/2 - btnW/2, H * 0.45, btnW, btnH, '#4CAF50', () => {
     console.log('[按钮] 创建房间被点击');
+    if (!socketConnected) {
+      console.warn('[Socket] 未连接，等待中...');
+      wx.showToast({ title: '连接中...', icon: 'loading' });
+      statusMsg = '连接中...';
+      render();
+      return;
+    }
     statusMsg = '创建中...';
     render();
     send('create_room');
@@ -550,6 +558,11 @@ function promptJoin() {
 }
 
 function send(ev, data) {
+  if (!socketConnected) {
+    console.warn('[Socket] 连接未建立，消息已丢弃:', ev);
+    wx.showToast({ title: '连接中...', icon: 'loading' });
+    return;
+  }
   const payload = data !== undefined ? JSON.stringify(data) : '';
   const msg = payload ? '42["' + ev + '",' + payload + ']' : '42["' + ev + '"]';
   console.log('[Socket] 发送消息:', ev, msg);
@@ -577,6 +590,12 @@ function connectServer() {
 
   wx.onSocketOpen(() => {
     console.log('[Socket] ✅ 已连接');
+    socketConnected = true;
+    // 连接成功后，如果已经在等待创建房间，重新发送
+    if (currentState === STATE.MENU && statusMsg === '创建中...') {
+      console.log('[Socket] 重发创建房间请求');
+      send('create_room');
+    }
   });
 
   wx.onSocketMessage(res => {
