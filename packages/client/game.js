@@ -1,6 +1,6 @@
 /**
- * 花札 Hanafuda - 完整版
- * 修复：布局、积分显示、玩法逻辑
+ * 花札 Hanafuda - 完整修复版
+ * 修复：布局、积分显示、役达成弹窗、收集区
  */
 
 const canvas = wx.createCanvas();
@@ -27,7 +27,7 @@ let socketConnected = false;
 
 // 动画
 let animatingCard = null;
-let popupState = { show: false };
+let popupState = { show: false, yakuList: [] };
 
 // UI
 let _buttons = [];
@@ -42,7 +42,7 @@ function loadCardImages(callback) {
   function onCardLoad() {
     loaded++;
     if (loaded >= total && callback) {
-      console.log('[资源] 所有卡牌加载完成');
+      console.log('[资源] 卡牌加载完成');
       callback();
     }
   }
@@ -75,11 +75,10 @@ function render() {
   _buttons = [];
 
   // 动态卡牌尺寸
-  const baseW = Math.min(W, 400);
-  const scale = baseW / 375;
-  const CARD_W = 45 * scale;
-  const CARD_H = 72 * scale;
-  const CARD_GAP = 4 * scale;
+  const scale = Math.min(W / 375, 1.0);
+  const CARD_W = 50 * scale;
+  const CARD_H = 80 * scale;
+  const CARD_GAP = 5 * scale;
 
   if (currentState === STATE.MENU) drawMenu(W, H);
   else if (currentState === STATE.LOBBY) drawLobby(W, H);
@@ -150,15 +149,10 @@ function drawMenu(W, H) {
   drawText('🌸 花札 Hanafuda 🌸', W/2, H * 0.3, 32, '#fff');
   const btnW = W * 0.6, btnH = 50;
   drawBtn('创建房间', W/2 - btnW/2, H * 0.45, btnW, btnH, '#4CAF50', () => {
-    console.log('[按钮] 创建房间被点击');
     if (!socketConnected) {
       wx.showToast({ title: '连接中...', icon: 'loading' });
-      statusMsg = '连接中...';
-      render();
       return;
     }
-    statusMsg = '创建中...';
-    render();
     send('create_room');
   });
   drawBtn('加入房间', W/2 - btnW/2, H * 0.58, btnW, btnH, '#2196F3', () => promptJoin());
@@ -173,8 +167,6 @@ function drawLobby(W, H) {
   drawText('人数：' + playerCount + ' / 2', W/2, H * 0.45, 20, '#fff');
   const btnW = W * 0.6, btnH = 50;
   drawBtn('开始游戏', W/2 - btnW/2, H * 0.55, btnW, btnH, '#FF9800', () => {
-    statusMsg = '请求开始...';
-    render();
     send('start_game');
   });
   drawText('提示：单人测试也可开始', W/2, H * 0.7, 14, '#aaa');
@@ -188,51 +180,54 @@ function drawGameScene(W, H, cw, ch, gap) {
     return;
   }
 
-  // --- 顶部信息栏 (积分 + 收集区) ---
-  const infoH = H * 0.12;
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  const oppIdx = (mySeatIndex + 1) % 2;
+  
+  // --- 顶部信息栏 ---
+  const infoH = H * 0.15;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(0, 0, W, infoH);
   
-  // 对手信息
-  const oppIdx = (mySeatIndex + 1) % 2;
-  drawText('对手', W * 0.1, infoH * 0.3, 14, '#aaa');
-  drawText('积分：' + (gameState.totalScores?.[oppIdx] || 0), W * 0.1, infoH * 0.55, 16, '#ffcc00');
+  // 对手信息（左侧）
+  drawText('对手', W * 0.08, infoH * 0.35, 14, '#aaa');
+  const oppScore = gameState.totalScores?.[oppIdx] || 0;
+  drawText('积分：' + oppScore, W * 0.08, infoH * 0.6, 18, '#ffcc00');
   
-  // 对手收集区（简略显示张数）
+  // 对手收集区
   const oppCaptured = gameState.captured?.[oppIdx]?.length || 0;
-  drawText('收集：' + oppCaptured + '张', W * 0.1, infoH * 0.8, 12, '#888');
+  drawText('收集：' + oppCaptured + '张', W * 0.08, infoH * 0.85, 12, '#888');
   
-  // 我的积分
-  drawText('我的积分：' + (gameState.totalScores?.[mySeatIndex] || 0), W * 0.75, infoH * 0.55, 16, '#ffcc00');
+  // 我的信息（右侧）
+  const myScore = gameState.totalScores?.[mySeatIndex] || 0;
+  drawText('我的积分：' + myScore, W * 0.85, infoH * 0.6, 18, '#ffcc00');
   
-  // 我的收集区（显示最近几张）
+  // 我的收集区（显示最近 5 张）
   const myCaptured = gameState.captured?.[mySeatIndex] || [];
-  drawText('收集：' + myCaptured.length + '张', W * 0.75, infoH * 0.8, 12, '#888');
+  drawText('收集：' + myCaptured.length + '张', W * 0.85, infoH * 0.85, 12, '#888');
   
-  // 显示收集的牌（缩略图）
-  const recentCards = myCaptured.slice(-5);
+  // 绘制收集的牌（缩略图）
+  const recentCards = myCaptured.slice(-6);
   recentCards.forEach((id, i) => {
     const img = cardImages[id];
     if (img) {
-      const thumbW = 20, thumbH = 32;
-      const thumbX = W * 0.82 + i * (thumbW + 2);
-      const thumbY = infoH * 0.6;
+      const thumbW = 18, thumbH = 28;
+      const thumbX = W * 0.92 - (recentCards.length - 1 - i) * (thumbW + 2);
+      const thumbY = infoH * 0.85 - thumbH;
       ctx.drawImage(img, thumbX, thumbY, thumbW, thumbH);
     }
   });
 
-  // --- 对手手牌 (顶部) ---
+  // --- 对手手牌 ---
   const oppHand = gameState.hands[oppIdx] || [];
   const oppCardW = cw * 0.7;
   const oppTotalW = oppHand.length * (oppCardW + 2);
   const oppStart = (W - oppTotalW) / 2;
   for (let i = 0; i < oppHand.length; i++) {
-    drawCardImg(oppStart + i * (oppCardW + 2), H * 0.1, null, oppCardW, ch * 0.7);
+    drawCardImg(oppStart + i * (oppCardW + 2), H * 0.18, null, oppCardW, ch * 0.7);
   }
 
-  // --- 场牌区 (中间) ---
-  const fieldY = H * 0.22;
-  const fieldH = H * 0.32;
+  // --- 场牌区 ---
+  const fieldY = H * 0.28;
+  const fieldH = H * 0.35;
   ctx.fillStyle = '#082d15';
   roundRect(W * 0.05, fieldY, W * 0.9, fieldH, 10);
   ctx.fill();
@@ -240,66 +235,124 @@ function drawGameScene(W, H, cw, ch, gap) {
   ctx.lineWidth = 2;
   roundRect(W * 0.05, fieldY, W * 0.9, fieldH, 10);
   ctx.stroke();
-  drawText('场牌区', W/2, fieldY + fieldH * 0.06, 14, '#558855');
+  drawText('场牌区', W/2, fieldY + 15, 14, '#558855');
 
   const field = gameState.field || [];
-  // 自适应场牌布局
   const maxPerRow = Math.floor((W * 0.85) / (cw + gap));
-  const fieldCards = field.slice(0, maxPerRow * 2); // 最多显示两排
+  const fieldCards = field.slice(0, maxPerRow * 2);
   const rows = Math.ceil(fieldCards.length / maxPerRow) || 1;
-  const rowH = fieldH * 0.7 / rows;
+  const rowH = (fieldH - 40) / Math.max(rows, 1);
   
   fieldCards.forEach((id, i) => {
     const row = Math.floor(i / maxPerRow);
     const col = i % maxPerRow;
-    const rowStart = fieldY + fieldH * 0.15 + row * (ch * 0.35 + 2);
-    const colStart = (W - maxPerRow * (cw + gap)) / 2 + col * (cw + gap);
-    drawCardIMG(colStart, rowStart, id, cw, ch * 0.35);
+    const cardX = (W - maxPerRow * (cw + gap)) / 2 + col * (cw + gap);
+    const cardY = fieldY + 25 + row * (ch * 0.4 + 3);
+    drawCardIMG(cardX, cardY, id, cw, ch * 0.4);
   });
 
-  // --- 山札 (右侧) ---
-  const deckX = W * 0.82;
-  const deckY = fieldY + 10;
+  // --- 山札 ---
+  const deckX = W * 0.85;
+  const deckY = fieldY + 20;
   ctx.fillStyle = '#5D4037';
   roundRect(deckX, deckY, cw, ch, 6);
   ctx.fill();
-  drawText('山札', deckX + cw/2, deckY + ch * 0.25, 10, '#fff');
-  drawText(String(gameState.deck.length), deckX + cw/2, deckY + ch * 0.45, 12, '#fff');
+  drawText('山札', deckX + cw/2, deckY + ch * 0.25, 11, '#fff');
+  drawText(String(gameState.deck.length), deckX + cw/2, deckY + ch * 0.45, 13, '#fff');
 
-  // --- 回合指示器 (左上角) ---
+  // --- 回合指示器 ---
   drawTurnIndicator(W, H);
 
-  // --- 玩家手牌 (底部) ---
-  const handY = H * 0.68;
+  // --- 玩家手牌 ---
+  const handY = H * 0.72;
   const myHand = gameState.hands[mySeatIndex] || [];
   const hTotalW = myHand.length * (cw + gap);
   const hStart = (W - hTotalW) / 2;
   myHand.forEach((id, i) => {
     const isSel = (id === selectedCardId);
-    const y = isSel ? handY - 10 : handY;
+    const y = isSel ? handY - 12 : handY;
     drawCardIMG(hStart + i * (cw + gap), y, id, cw, ch, isSel);
   });
 
   // --- 状态提示 ---
-  drawText(statusMsg, W/2, H - 15, 16, '#ffcc00');
+  drawText(statusMsg, W/2, H - 18, 16, '#ffcc00');
 }
 
 function drawTurnIndicator(W, H) {
   if (!gameState) return;
   const isMyTurn = (gameState.currentPlayerIndex === mySeatIndex);
-  const x = W * 0.05, y = H * 0.05, w = W * 0.25, h = 30;
-  ctx.fillStyle = isMyTurn ? 'rgba(76,175,80,0.85)' : 'rgba(255,152,0,0.85)';
+  const x = W * 0.05, y = H * 0.18, w = W * 0.22, h = 28;
+  ctx.fillStyle = isMyTurn ? 'rgba(76,175,80,0.9)' : 'rgba(255,152,0,0.9)';
   roundRect(x, y, w, h, 8);
   ctx.fill();
   drawText(isMyTurn ? '✋ 你的回合' : '⏳ 对手', x + w/2, y + h * 0.6, 13, '#fff');
 }
 
+// ================= 界面：弹窗 =================
+function drawPopup(W, H) {
+  if (!popupState.show) return;
+  
+  // 半透明遮罩
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillRect(0, 0, W, H);
+  
+  const pw = Math.min(W * 0.85, 340);
+  const ph = H * 0.45;
+  const px = W/2 - pw/2;
+  const py = H/2 - ph/2;
+  
+  // 弹窗背景
+  ctx.fillStyle = '#fff';
+  roundRect(px, py, pw, ph, 15);
+  ctx.fill();
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 3;
+  roundRect(px, py, pw, ph, 15);
+  ctx.stroke();
+  
+  // 标题
+  drawText('🎉 役达成！', W/2, py + ph * 0.18, 26, '#D32F2F');
+  drawText('是否继续 (Koi-Koi)?', W/2, py + ph * 0.32, 16, '#333');
+  
+  // 役列表
+  if (popupState.yakuList && popupState.yakuList.length > 0) {
+    let y = py + ph * 0.42;
+    popupState.yakuList.forEach((yaku, i) => {
+      drawText(yaku.label + '：' + yaku.points + '分', W/2, y + i * 20, 14, '#555');
+    });
+  }
+  
+  drawText('继续则分数翻倍，对手先结束则 0 分', W/2, py + ph * 0.58, 12, '#888');
+  
+  // 按钮
+  const bw = pw * 0.38, bh = ph * 0.14;
+  drawBtn('继续 (x2)', px + pw * 0.08, py + ph * 0.72, bw, bh, '#4CAF50', () => {
+    popupState.show = false;
+    popupState.yakuList = [];
+    send('koi_koi');
+    statusMsg = '继续游戏！';
+    currentState = STATE.GAME;
+    render();
+  });
+  drawBtn('结算', px + pw * 0.54, py + ph * 0.72, bw, bh, '#f44336', () => {
+    popupState.show = false;
+    popupState.yakuList = [];
+    send('end_round');
+    statusMsg = '结算中...';
+    currentState = STATE.GAME;
+    render();
+  });
+}
+
 // ================= 界面：结算 =================
 function drawResultScreen(W, H) {
   drawBg();
-  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
   ctx.fillRect(0, 0, W, H);
-  const pw = W * 0.75, ph = H * 0.5;
+  
+  const pw = Math.min(W * 0.85, 360);
+  const ph = H * 0.55;
+  
   ctx.fillStyle = '#fff';
   roundRect(W/2 - pw/2, H/2 - ph/2, pw, ph, 15);
   ctx.fill();
@@ -308,85 +361,48 @@ function drawResultScreen(W, H) {
   roundRect(W/2 - pw/2, H/2 - ph/2, pw, ph, 15);
   ctx.stroke();
   
-  // 标题
   const gameOver = resultData?.gameOver;
   drawText(gameOver ? '🏆 游戏结束' : '🏁 本局结束', W/2, H/2 - ph * 0.35, 28, gameOver ? '#FFD700' : '#333');
   
   if (resultData) {
-    const s = resultData.roundScores;
-    drawText('本局得分：' + s[0] + ' - ' + s[1], W/2, H/2 - ph * 0.15, 20, '#555');
-    drawText('累计积分：' + resultData.totalScores[0] + ' - ' + resultData.totalScores[1], W/2, H/2 - ph * 0.02, 24, '#000');
+    const s = resultData.roundScores || [0, 0];
+    drawText('本局得分：' + s[0] + ' - ' + s[1], W/2, H/2 - ph * 0.18, 20, '#555');
     
-    if (gameOver) {
-      // 显示获胜者
-      const winnerIdx = resultData.totalScores[0] >= resultData.totalScores[1] ? 0 : 1;
+    const total = resultData.totalScores || [0, 0];
+    drawText('累计积分：' + total[0] + ' - ' + total[1], W/2, H/2 - ph * 0.05, 24, '#000');
+    
+    if (gameOver && total.length >= 2) {
+      const winnerIdx = total[0] >= total[1] ? 0 : 1;
       const winnerName = winnerIdx === mySeatIndex ? '你' : '对手';
-      drawText(winnerName + '获胜！', W/2, H/2 + ph * 0.12, 26, '#D32F2F');
+      drawText(winnerName + '获胜！', W/2, H/2 + ph * 0.1, 26, '#D32F2F');
       drawText('目标分数：7 分', W/2, H/2 + ph * 0.22, 16, '#888');
     } else {
-      drawText('先达到 7 分者获胜', W/2, H/2 + ph * 0.18, 16, '#888');
+      drawText('先达到 7 分者获胜', W/2, H/2 + ph * 0.15, 16, '#888');
     }
   }
   
-  // 按钮
-  const bw = pw * 0.45, bh = ph * 0.12;
+  const bw = pw * 0.42, bh = ph * 0.12;
   if (gameOver) {
-    // 游戏结束：显示"再来一局"和"返回大厅"
-    drawBtn('🔄 再来一局', W/2 - bw - 5, H/2 + ph * 0.35, bw, bh, '#FF9800', () => {
-      statusMsg = '请求新游戏...';
-      render();
+    drawBtn('🔄 再来一局', W/2 - bw - 5, H/2 + ph * 0.38, bw, bh, '#FF9800', () => {
       send('start_game');
     });
-    drawBtn('🏠 返回大厅', W/2 + 5, H/2 + ph * 0.35, bw, bh, '#4CAF50', () => {
+    drawBtn('🏠 返回大厅', W/2 + 5, H/2 + ph * 0.38, bw, bh, '#4CAF50', () => {
       currentState = STATE.LOBBY;
       gameState = null;
       resultData = null;
       render();
     });
   } else {
-    // 局间结算：显示"下一局"和"返回大厅"
-    drawBtn('▶️ 下一局', W/2 - bw - 5, H/2 + ph * 0.35, bw, bh, '#2196F3', () => {
-      statusMsg = '请求下一局...';
-      render();
+    drawBtn('▶️ 下一局', W/2 - bw - 5, H/2 + ph * 0.38, bw, bh, '#2196F3', () => {
       send('start_game');
     });
-    drawBtn('🏠 返回大厅', W/2 + 5, H/2 + ph * 0.35, bw, bh, '#9E9E9E', () => {
+    drawBtn('🏠 返回大厅', W/2 + 5, H/2 + ph * 0.38, bw, bh, '#9E9E9E', () => {
       currentState = STATE.LOBBY;
       gameState = null;
       resultData = null;
       render();
     });
   }
-}
-
-// ================= 界面：弹窗 =================
-function drawPopup(W, H) {
-  if (!popupState.show) return;
-  ctx.fillStyle = 'rgba(0,0,0,0.8)';
-  ctx.fillRect(0, 0, W, H);
-  const pw = W * 0.75, ph = H * 0.4, px = W/2 - pw/2, py = H/2 - ph/2;
-  ctx.fillStyle = '#fff';
-  roundRect(px, py, pw, ph, 15);
-  ctx.fill();
-  ctx.strokeStyle = '#FFD700';
-  ctx.lineWidth = 2;
-  roundRect(px, py, pw, ph, 15);
-  ctx.stroke();
-  drawText('🎉 役达成！', W/2, py + ph * 0.25, 24, '#D32F2F');
-  drawText('是否继续 (Koi-Koi)?', W/2, py + ph * 0.42, 16, '#333');
-  const bw = pw * 0.35, bh = ph * 0.18;
-  drawBtn('继续 (x2)', px + pw * 0.1, py + ph * 0.62, bw, bh, '#4CAF50', () => {
-    popupState.show = false;
-    send('koi_koi');
-    statusMsg = '继续游戏！';
-    render();
-  });
-  drawBtn('结算', px + pw * 0.55, py + ph * 0.62, bw, bh, '#f44336', () => {
-    popupState.show = false;
-    send('end_round');
-    statusMsg = '结算中...';
-    render();
-  });
 }
 
 // ================= 卡牌渲染 =================
@@ -439,13 +455,19 @@ wx.onTouchStart(e => {
 
   if (currentState === STATE.POPUP) {
     const W = canvas.width, H = canvas.height;
-    const pw = W * 0.75, ph = H * 0.4, px = W/2 - pw/2, py = H/2 - ph/2;
-    const bw = pw * 0.35, bh = ph * 0.18;
-    if (x > px + pw * 0.1 && x < px + pw * 0.1 + bw && y > py + ph * 0.62 && y < py + ph * 0.62 + bh) {
-      popupState.show = false; send('koi_koi'); statusMsg = '继续！'; render(); return;
+    const pw = Math.min(W * 0.85, 340);
+    const ph = H * 0.45;
+    const px = W/2 - pw/2;
+    const py = H/2 - ph/2;
+    const bw = pw * 0.38, bh = ph * 0.14;
+    
+    if (x > px + pw * 0.08 && x < px + pw * 0.08 + bw && y > py + ph * 0.72 && y < py + ph * 0.72 + bh) {
+      popupState.show = false; popupState.yakuList = [];
+      send('koi_koi'); statusMsg = '继续游戏！'; currentState = STATE.GAME; render(); return;
     }
-    if (x > px + pw * 0.55 && x < px + pw * 0.55 + bw && y > py + ph * 0.62 && y < py + ph * 0.62 + bh) {
-      popupState.show = false; send('end_round'); statusMsg = '结算中...'; render(); return;
+    if (x > px + pw * 0.54 && x < px + pw * 0.54 + bw && y > py + ph * 0.72 && y < py + ph * 0.72 + bh) {
+      popupState.show = false; popupState.yakuList = [];
+      send('end_round'); statusMsg = '结算中...'; currentState = STATE.GAME; render(); return;
     }
     return;
   }
@@ -460,10 +482,9 @@ wx.onTouchStart(e => {
 
   if (currentState === STATE.GAME && gameState) {
     const W = canvas.width, H = canvas.height;
-    const baseW = Math.min(W, 400);
-    const scale = baseW / 375;
-    const cw = 45 * scale, ch = 72 * scale, gap = 4 * scale;
-    const handY = H * 0.68;
+    const scale = Math.min(W / 375, 1.0);
+    const cw = 50 * scale, ch = 80 * scale, gap = 5 * scale;
+    const handY = H * 0.72;
     const myHand = gameState.hands[mySeatIndex] || [];
     const hTotalW = myHand.length * (cw + gap);
     const hStart = (W - hTotalW) / 2;
@@ -471,7 +492,7 @@ wx.onTouchStart(e => {
       const id = myHand[i];
       const isSel = (id === selectedCardId);
       const cardX = hStart + i * (cw + gap);
-      const cardY = isSel ? handY - 10 : handY;
+      const cardY = isSel ? handY - 12 : handY;
       if (x > cardX && x < cardX + cw && y > cardY && y < cardY + ch) {
         handleTap(id, cardX, cardY, cw, ch, gap, handY); return;
       }
@@ -485,13 +506,12 @@ function handleTap(id, fromX, fromY, cw, ch, gap, handY) {
   }
   if (selectedCardId === id) {
     const W = canvas.width, H = canvas.height;
-    const fieldY = H * 0.22;
+    const fieldY = H * 0.28;
     const field = gameState.field || [];
     const maxPerRow = Math.floor((W * 0.85) / (cw + gap));
-    const rows = Math.ceil(field.length / maxPerRow) || 1;
     const fStart = (W - maxPerRow * (cw + gap)) / 2;
     const toX = fStart + (field.length % maxPerRow) * (cw + gap);
-    const toY = fieldY + 10 + Math.floor(field.length / maxPerRow) * (ch * 0.35 + 2);
+    const toY = fieldY + 25 + Math.floor(field.length / maxPerRow) * (ch * 0.4 + 3);
     playCardAnim(id, fromX, fromY, toX, toY);
     statusMsg = '出牌中...'; render();
     send('play_card', id);
@@ -508,7 +528,7 @@ function playCardAnim(id, fromX, fromY, toX, toY) {
 function promptJoin() {
   wx.showModal({
     title: '加入房间', editable: true, placeholderText: '6 位数字',
-    success: res => { if (res.confirm && res.content) { statusMsg = '加入中...'; render(); send('join_room', res.content); } }
+    success: res => { if (res.confirm && res.content) { send('join_room', res.content); } }
   });
 }
 
@@ -568,7 +588,7 @@ function connectServer() {
   
   wx.connectSocket({
     url: CONFIG.SERVER_URL,
-    fail: (err) => { console.error('[Socket] ❌ 连接失败:', err); statusMsg = '连接失败'; render(); },
+    fail: (err) => { console.error('[Socket] ❌ 连接失败:', err); },
     success: () => console.log('[Socket] 连接请求已发送')
   });
 }
@@ -578,12 +598,10 @@ function onEvent(ev, pay) {
   console.log('[Event] 收到:', ev, pay);
   
   if (ev === 'room_created') {
-    console.log('[房间] 创建成功:', pay.room.id);
     myRoomId = pay.room.id;
     mySeatIndex = 0;
     playerCount = pay.room.players.length;
     currentState = STATE.LOBBY;
-    statusMsg = '房间已创建';
   }
   else if (ev === 'room_joined') {
     myRoomId = pay.room.id;
@@ -593,7 +611,6 @@ function onEvent(ev, pay) {
   }
   else if (ev === 'player_joined') { if (pay.room) playerCount = pay.room.players.length; }
   else if (ev === 'game_start') {
-    console.log('[游戏] 游戏开始');
     gameState = pay.state;
     currentState = STATE.GAME;
     selectedCardId = null;
@@ -612,17 +629,17 @@ function onEvent(ev, pay) {
     selectedCardId = null;
   }
   else if (ev === 'yaku_found') {
-    console.log('[役达成] 弹出对话框');
+    console.log('[役达成] 显示弹窗');
     stopTurnTimer();
-    statusMsg = '役达成！';
     popupState.show = true;
+    popupState.yakuList = pay.yaku || [];
+    currentState = STATE.POPUP;
     render();
   }
   else if (ev === 'round_end') {
     console.log('[结算] 本局结束', pay);
     stopTurnTimer();
     resultData = pay;
-    // 确保 totalScores 正确传递
     if (pay.state && pay.state.totalScores) {
       resultData.totalScores = pay.state.totalScores;
     }
@@ -630,7 +647,7 @@ function onEvent(ev, pay) {
     render();
   }
   else if (ev === 'game_end') {
-    console.log('[游戏结束] 获胜者：', pay.winner?.nickname, '比分：', pay.totalScores);
+    console.log('[游戏结束] 获胜者:', pay.winner?.nickname, '比分:', pay.totalScores);
     if (resultData) {
       resultData.gameOver = true;
       resultData.winner = pay.winner;
