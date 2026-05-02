@@ -7,6 +7,7 @@ const canvas = wx.createCanvas();
 const ctx = canvas.getContext('2d');
 
 const CONFIG = {
+  // 通过 Nginx 80 端口连接（已配置反向代理）
   SERVER_URL: 'ws://47.253.96.212/socket.io/?EIO=4&transport=websocket',
   TURN_TIMEOUT: 15000
 };
@@ -576,27 +577,62 @@ function send(ev, data) {
 // ================= 网络 =================
 function connectServer() {
   console.log('[Socket] 开始连接:', CONFIG.SERVER_URL);
-  wx.connectSocket({
-    url: CONFIG.SERVER_URL,
-    fail: (err) => {
-      console.error('[Socket] 连接失败:', err);
-      statusMsg = '连接失败';
-      render();
-    },
-    success: () => {
-      console.log('[Socket] 连接请求已发送');
-    }
-  });
-
+  
+  // 先注册事件处理器（必须在 connectSocket 之前）
   wx.onSocketOpen(() => {
-    console.log('[Socket] ✅ 已连接');
+    console.log('[Socket] ✅ onSocketOpen 触发 - 已连接');
     socketConnected = true;
-    // 连接成功后，如果已经在等待创建房间，重新发送
     if (currentState === STATE.MENU && statusMsg === '创建中...') {
       console.log('[Socket] 重发创建房间请求');
       send('create_room');
     }
   });
+  
+  wx.onSocketError((err) => {
+    console.error('[Socket] ❌ onSocketError:', err);
+    statusMsg = '连接错误';
+    render();
+  });
+  
+  wx.onSocketClose(() => {
+    console.log('[Socket] 连接已关闭');
+    socketConnected = false;
+  });
+  
+  wx.onSocketMessage((res) => {
+    console.log('[Socket] 收到消息:', res.data);
+    let d = res.data;
+    if (d instanceof ArrayBuffer) {
+      d = String.fromCharCode.apply(null, new Uint8Array(d));
+    }
+    if (typeof d !== 'string') return;
+    if (d.charAt(0) === '0') wx.sendSocketMessage({ data: '40' });
+    if (d.charAt(0) === '2') wx.sendSocketMessage({ data: '3' });
+    if (d.startsWith('42')) {
+      try {
+        const arr = JSON.parse(d.substring(2));
+        onEvent(arr[0], arr[1]);
+      } catch(e) {
+        console.error('解析失败:', e);
+      }
+    }
+  });
+  
+  // 然后发起连接
+  console.log('[Socket] 调用 wx.connectSocket...');
+  wx.connectSocket({
+    url: CONFIG.SERVER_URL,
+    fail: (err) => {
+      console.error('[Socket] ❌ connectSocket fail:', err);
+      statusMsg = '连接失败';
+      render();
+    },
+    success: () => {
+      console.log('[Socket] connectSocket success - 请求已发送');
+    }
+  });
+  console.log('[Socket] connectSocket 调用完成');
+}
 
   wx.onSocketMessage(res => {
     let d = res.data;
