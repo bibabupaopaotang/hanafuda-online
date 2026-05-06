@@ -119,10 +119,21 @@ function render() {
 
   if (currentState === STATE.MENU) drawMenu(W, H);
   else if (currentState === STATE.LOBBY) drawLobby(W, H);
-  else if (currentState === STATE.GAME) drawGameSceneHorizontal(W, H, CARD_W, CARD_H, CARD_GAP);
+  else if (currentState === STATE.GAME) {
+    // 检查是否是单机测试模式
+    if (testModeState) {
+      renderTestMode(W, H, CARD_W, CARD_H, CARD_GAP);
+    } else {
+      drawGameSceneHorizontal(W, H, CARD_W, CARD_H, CARD_GAP);
+    }
+  }
   else if (currentState === STATE.RESULT) drawResultScreen(W, H);
   else if (currentState === STATE.POPUP) { 
-    drawGameSceneHorizontal(W, H, CARD_W, CARD_H, CARD_GAP); 
+    if (testModeState) {
+      renderTestMode(W, H, CARD_W, CARD_H, CARD_GAP);
+    } else {
+      drawGameSceneHorizontal(W, H, CARD_W, CARD_H, CARD_GAP);
+    }
     drawPopup(W, H);
   }
 
@@ -205,23 +216,24 @@ function drawCardIMG(x, y, id, w, h, selected = false) {
 // ================= 界面：菜单 =================
 function drawMenu(W, H) {
   drawBg();
-  drawText('🌸 花札 Hanafuda 🌸', W/2, H * 0.35, 42, '#fff');
-  const btnW = W * 0.5, btnH = 60;
-  drawBtn('创建房间', W/2 - btnW/2, H * 0.48, btnW, btnH, '#4CAF50', () => {
+  drawText('🌸 花札 Hanafuda 🌸', W/2, H * 0.32, 42, '#fff');
+  const btnW = W * 0.5, btnH = 55;
+  drawBtn('创建房间', W/2 - btnW/2, H * 0.43, btnW, btnH, '#4CAF50', () => {
     if (!socketConnected) {
       wx.showToast({ title: '连接中...', icon: 'loading' });
       return;
     }
     send('create_room');
   });
-  drawBtn('加入房间', W/2 - btnW/2, H * 0.58, btnW, btnH, '#2196F3', () => promptJoin());
-  drawBtn('📋 役说明', W/2 - btnW/2, H * 0.68, btnW, btnH, '#9C27B0', () => {
+  drawBtn('加入房间', W/2 - btnW/2, H * 0.53, btnW, btnH, '#2196F3', () => promptJoin());
+  drawBtn('🎮 单机测试', W/2 - btnW/2, H * 0.63, btnW, btnH, '#FF9800', startSinglePlayerTest);
+  drawBtn('📋 役说明', W/2 - btnW/2, H * 0.73, btnW, btnH, '#9C27B0', () => {
     currentState = STATE.POPUP;
     popupState.show = true;
     popupState.yakuHelp = true;
     render();
   });
-  drawText(statusMsg, W/2, H * 0.85, 18, '#aaa');
+  drawText(statusMsg, W/2, H * 0.88, 18, '#aaa');
 }
 
 // ================= 界面：大厅 =================
@@ -841,3 +853,188 @@ loadCardImages(() => {
   currentState = STATE.MENU;
   render();
 });
+
+// ================= 单机测试模式 =================
+let testModeState = null;
+
+function startSinglePlayerTest() {
+  console.log('[单机测试] 启动');
+  testModeState = {
+    field: [],
+    hand: [],
+    captured: [],
+    deck: []
+  };
+  
+  const deck = [];
+  for (let i = 0; i < 48; i++) deck.push(i);
+  shuffle(deck);
+  
+  testModeState.field = deck.slice(0, 8);
+  testModeState.hand = deck.slice(8, 16);
+  testModeState.deck = deck.slice(16);
+  
+  currentState = STATE.GAME;
+  statusMsg = '单机测试 - 点击手牌出牌';
+  render();
+}
+
+function shuffle(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
+function getCardMonth(cardId) {
+  const map = {
+    0:1,1:1,2:1,3:1, 4:2,5:2,6:2,7:2, 8:3,9:3,10:3,11:3,
+    12:4,13:4,14:4,15:4, 16:5,17:5,18:5,19:5, 20:6,21:6,22:6,23:6,
+    24:7,25:7,26:7,27:7, 28:8,29:8,30:8,31:8, 32:9,33:9,34:9,35:9,
+    36:10,37:10,38:10,39:10, 40:11,41:11,42:11,43:11, 44:12,45:12,46:12,47:12
+  };
+  return map[cardId] || 1;
+}
+
+function renderTestMode(W, H, cw, ch, gap) {
+  drawBg();
+  if (!testModeState) return;
+  
+  const layout = HORIZONTAL_LAYOUT;
+  const scale = layout.cardScale;
+  
+  // 场牌区
+  const fa = layout.areas.field;
+  const fX = W * fa.x, fY = H * fa.y, fW = W * fa.w, fH = H * fa.h;
+  const fcW = cw * scale.field, fcH = ch * scale.field;
+  
+  ctx.fillStyle = 'rgba(8,45,21,0.8)';
+  roundRect(fX, fY, fW, fH, 15);
+  ctx.fill();
+  ctx.strokeStyle = '#2e5c3e';
+  ctx.lineWidth = 3;
+  roundRect(fX, fY, fW, fH, 15);
+  ctx.stroke();
+  drawText('场牌区', fX + fW/2, fY + 30, 22, '#558855');
+  
+  const cols = 4, rows = 3;
+  const gridW = (fW - 40) / cols, gridH = (fH - 60) / rows;
+  
+  testModeState.field.forEach((id, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    const cX = fX + 20 + col * gridW + (gridW - fcW) / 2;
+    const cY = fY + 50 + row * gridH + (gridH - fcH) / 2;
+    drawCardIMG(cX, cY, id, fcW, fcH);
+  });
+  
+  // 手牌区
+  const pa = layout.areas.playerHand;
+  const pX = W * pa.x, pY = H * pa.y;
+  const hcW = cw * scale.hand, hcH = ch * scale.hand;
+  
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  roundRect(pX - 20, pY - 10, W * pa.w + 40, H * pa.h + 20, 10);
+  ctx.fill();
+  
+  const overlap = hcW * 0.4;
+  const totalW = hcW + (testModeState.hand.length - 1) * overlap;
+  const start = pX + (W * pa.w - totalW) / 2;
+  
+  testModeState.hand.forEach((id, i) => {
+    drawCardIMG(start + i * overlap, pY, id, hcW, hcH);
+  });
+  
+  // 计分区
+  const ra = layout.areas.rightCapture;
+  const rX = W * ra.x, rY = H * ra.y, rW = W * ra.w, rH = H * ra.h;
+  
+  ctx.fillStyle = 'rgba(245,245,220,0.95)';
+  roundRect(rX, rY, rW, rH, 10);
+  ctx.fill();
+  ctx.strokeStyle = '#3C2415';
+  ctx.lineWidth = 2;
+  roundRect(rX, rY, rW, rH, 10);
+  ctx.stroke();
+  
+  drawText('📊 收集区', rX + 15, rY + 30, 24, '#3C2415', 'left');
+  drawText(`已收集：${testModeState.captured.length}张`, rX + rW/2, rY + 80, 20, '#666');
+  
+  const cap = testModeState.captured.slice(-12);
+  const ccW = 30, ccH = 48;
+  cap.forEach((id, i) => {
+    const c = i % 4, r = Math.floor(i / 4);
+    drawCardIMG(rX + 20 + c * 35, rY + 100 + r * 53, id, ccW, ccH);
+  });
+  
+  // 山札
+  const ma = layout.areas.mountain;
+  const mX = W * ma.x, mY = H * ma.y, mW = W * ma.w, mH = H * ma.h;
+  ctx.fillStyle = '#5D4037';
+  roundRect(mX, mY, mW, mH, 8);
+  ctx.fill();
+  drawText('山札', mX + mW/2, mY + mH * 0.35, 18, '#fff');
+  drawText(String(testModeState.deck.length), mX + mW/2, mY + mH * 0.6, 22, '#ffcc00');
+  
+  // 状态栏
+  const sa = layout.areas.statusBar;
+  ctx.fillStyle = 'rgba(26,26,46,0.9)';
+  ctx.fillRect(0, H * sa.y, W, H * sa.h);
+  drawText('🎮 单机测试', W/2, H * 0.97, 22, '#4CAF50');
+  drawText(`剩余：${testModeState.deck.length}`, W * 0.9, H * 0.97, 20, '#aaa', 'right');
+  
+  drawText(statusMsg, W/2, H - 25, 18, '#ffcc00');
+}
+
+// 测试模式输入处理
+const origTouchStart = canvas.addEventListener;
+canvas.addEventListener('touchstart', function(e) {
+  if (testModeState && currentState === STATE.GAME) {
+    const touch = e.touches[0];
+    const x = touch.clientX, y = touch.clientY;
+    
+    const layout = HORIZONTAL_LAYOUT;
+    const pa = layout.areas.playerHand;
+    const pX = canvas.width * pa.x, pY = canvas.height * pa.y;
+    const scale = layout.cardScale;
+    const hcW = 115 * scale.hand, hcH = 177 * scale.hand;
+    const overlap = hcW * 0.4;
+    const totalW = hcW + (testModeState.hand.length - 1) * overlap;
+    const start = pX + (canvas.width * pa.w - totalW) / 2;
+    
+    for (let i = testModeState.hand.length - 1; i >= 0; i--) {
+      const cX = start + i * overlap;
+      if (x >= cX && x <= cX + hcW && y >= pY && y <= pY + hcH) {
+        const cardId = testModeState.hand[i];
+        handleTestModePlay(cardId);
+        return;
+      }
+    }
+  }
+});
+
+function handleTestModePlay(cardId) {
+  const fieldMonth = testModeState.field.map(id => getCardMonth(id));
+  const cardMonth = getCardMonth(cardId);
+  
+  const matchIdx = fieldMonth.indexOf(cardMonth);
+  
+  if (matchIdx >= 0) {
+    const matched = testModeState.field[matchIdx];
+    testModeState.field.splice(matchIdx, 1);
+    testModeState.captured.push(cardId, matched);
+    testModeState.hand = testModeState.hand.filter(id => id !== cardId);
+    
+    if (testModeState.hand.length === 0 && testModeState.deck.length >= 8) {
+      testModeState.hand = testModeState.deck.slice(0, 8);
+      testModeState.deck = testModeState.deck.slice(8);
+    }
+    
+    statusMsg = `配对成功！${cardId} + ${matched}`;
+  } else {
+    testModeState.field.push(cardId);
+    testModeState.hand = testModeState.hand.filter(id => id !== cardId);
+    statusMsg = `打出 ${cardId}（未匹配）`;
+  }
+  
+  render();
+}
