@@ -742,8 +742,15 @@ function connectServer() {
   });
   
   wx.onSocketMessage((res) => {
-    const data = JSON.parse(res.data);
-    handleServerMessage(data);
+    console.log('[Socket] 原始消息:', res.data);
+    try {
+      const data = JSON.parse(res.data);
+      console.log('[Socket] 解析成功:', data);
+      handleServerMessage(data);
+    } catch (err) {
+      console.error('[Socket] JSON 解析失败:', err, '原始数据:', res.data);
+      statusMsg = '数据解析错误';
+    }
   });
   
   wx.onSocketClose(() => {
