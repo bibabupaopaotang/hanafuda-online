@@ -814,9 +814,12 @@ function handleServerMessage(data) {
       playerCount = data.playerCount;
       statusMsg = `已加入房间：${myRoomId}`;
       break;
+    case 'game_start':
     case 'game_started':
       currentState = STATE.GAME;
+      gameState = data.state;
       statusMsg = '游戏开始！';
+      render();
       break;
     case 'round_result':
       showRoundResult(data);
