@@ -829,15 +829,32 @@ function scheduleReconnect() {
 function send(event, payload = {}) {
   if (!socketConnected) {
     console.warn('[Socket] 连接未建立:', event);
+    statusMsg = '未连接服务器';
     return;
   }
+  
   const msg = { event, ...payload };
-  console.log('[Socket] 发送:', msg);
-  wx.sendSocketMessage({
-    data: JSON.stringify(msg),
-    success: () => console.log('[Socket] 发送成功:', event),
-    fail: (err) => console.error('[Socket] 发送失败:', event, err)
-  });
+  const msgStr = JSON.stringify(msg);
+  
+  console.log('[Socket] 准备发送:', event);
+  console.log('[Socket] 消息内容:', msgStr);
+  
+  try {
+    wx.sendSocketMessage({
+      data: msgStr,
+      success: () => {
+        console.log('[Socket] ✅ 发送成功:', event);
+        statusMsg = '已发送：' + event;
+      },
+      fail: (err) => {
+        console.error('[Socket] ❌ 发送失败:', event, err);
+        statusMsg = '发送失败';
+      }
+    });
+  } catch (err) {
+    console.error('[Socket] 发送异常:', err);
+    statusMsg = '发送错误';
+  }
 }
 
 function handleServerMessage(data) {
