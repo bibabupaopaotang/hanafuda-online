@@ -755,23 +755,36 @@ function connectServer() {
   
   wx.onSocketMessage((res) => {
     const rawData = res.data;
+    console.log('[Socket] 收到原始消息:', rawData);
+    
     try {
       // Socket.IO 消息格式：类型 + JSON (0=open, 4=message)
       const type = rawData.charAt(0);
       const jsonData = rawData.substring(1);
       
+      console.log('[Socket] 消息类型:', type, 'JSON:', jsonData.substring(0, 200));
+      
       if (type === '0') {
         // 握手消息
-        console.log('[Socket] 握手成功');
+        console.log('[Socket] ✅ 握手成功');
         socketConnected = true;
         statusMsg = '已连接服务器';
       } else if (type === '4') {
         // 业务消息
         const data = JSON.parse(jsonData);
+        console.log('[Socket] 业务消息:', data.event, data);
         handleServerMessage(data);
+      } else if (type === '2') {
+        // ping
+        console.log('[Socket] ping');
+      } else if (type === '3') {
+        // pong
+        console.log('[Socket] pong');
+      } else {
+        console.log('[Socket] 未知类型:', type);
       }
     } catch (err) {
-      console.error('[Socket] 消息解析失败:', err, '数据:', rawData.substring(0, 100));
+      console.error('[Socket] ❌ 解析失败:', err, '数据:', rawData);
     }
   });
   
