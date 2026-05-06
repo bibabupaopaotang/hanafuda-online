@@ -742,14 +742,45 @@ function connectServer() {
   });
   
   wx.onSocketMessage((res) => {
-    console.log('[Socket] 原始消息:', res.data);
+    const rawData = res.data;
+    console.log('[Socket] 原始消息:', rawData);
+    
     try {
-      const data = JSON.parse(res.data);
-      console.log('[Socket] 解析成功:', data);
-      handleServerMessage(data);
+      // Socket.IO 消息格式：类型 + JSON
+      // 0 = open, 1 = close, 2 = ping, 3 = pong, 4 = message, 5 = upgrade, 6 = noop
+      const type = rawData.charAt(0);
+      const jsonData = rawData.substring(1);
+      
+      console.log('[Socket] 消息类型:', type, 'JSON 部分:', jsonData);
+      
+      // 处理 Socket.IO 协议消息
+      switch (type) {
+        case '0': // open - 连接打开
+          console.log('[Socket] 连接已打开，SID:', jsonData);
+          socketConnected = true;
+          statusMsg = '已连接服务器';
+          break;
+          
+        case '2': // ping - 心跳
+          console.log('[Socket] 收到心跳');
+          break;
+          
+        case '3': // pong - 心跳响应
+          console.log('[Socket] 心跳响应');
+          break;
+          
+        case '4': // message - 业务消息
+          const data = JSON.parse(jsonData);
+          console.log('[Socket] 业务消息:', data);
+          handleServerMessage(data);
+          break;
+          
+        default:
+          console.log('[Socket] 未知消息类型:', type);
+      }
     } catch (err) {
-      console.error('[Socket] JSON 解析失败:', err, '原始数据:', res.data);
-      statusMsg = '数据解析错误';
+      console.error('[Socket] 消息处理失败:', err, '原始数据:', rawData);
+      statusMsg = '数据处理错误';
     }
   });
   
