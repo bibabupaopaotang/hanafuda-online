@@ -830,12 +830,20 @@ function send(event, payload = {}) {
     console.warn('[Socket] 连接未建立:', event);
     return;
   }
+  
+  // Socket.IO 消息格式：4 + JSON
+  // 4 表示 message 类型
   const msg = { event, ...payload };
-  console.log('[Socket] 发送:', msg);
+  const messageData = '4' + JSON.stringify(msg);
+  
+  console.log('[Socket] 发送:', event, payload);
   wx.sendSocketMessage({
-    data: JSON.stringify(msg),
+    data: messageData,
     success: () => console.log('[Socket] 发送成功:', event),
-    fail: (err) => console.error('[Socket] 发送失败:', event, err)
+    fail: (err) => {
+      console.error('[Socket] 发送失败:', event, err);
+      statusMsg = '发送失败';
+    }
   });
 }
 
