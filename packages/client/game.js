@@ -728,133 +728,50 @@ canvas.addEventListener('touchstart', (e) => {
 });
 
 // ================= 网络通信 =================
-let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 5;
-const RECONNECT_DELAY = 3000; // 3 秒后重连
-
 function connectServer() {
-  console.log('[Socket] 开始连接:', CONFIG.SERVER_URL);
-  statusMsg = '连接服务器中...';
-  
   wx.connectSocket({
     url: CONFIG.SERVER_URL,
-    success: () => console.log('[Socket] 连接请求已发送'),
-    fail: (err) => {
-      console.error('[Socket] 连接失败:', err);
-      statusMsg = '连接失败，重试中...';
-      scheduleReconnect();
-    }
+    success: () => console.log('[Socket] 连接中...'),
+    fail: (err) => console.error('[Socket] 连接失败:', err)
   });
   
   wx.onSocketOpen(() => {
-    reconnectAttempts = 0; // 重置重连计数
     socketConnected = true;
-    console.log('[Socket] ✅ 已连接');
+    console.log('[Socket] 已连接');
     statusMsg = '已连接服务器';
   });
   
   wx.onSocketMessage((res) => {
-    const rawData = res.data;
-    console.log('[Socket] 收到消息:', rawData.substring(0, 100));
-    
+    console.log('[Socket] 原始消息:', res.data);
     try {
-      // Socket.IO 消息格式：类型 + JSON
-      // 0 = open, 1 = close, 2 = ping, 3 = pong, 4 = message, 5 = upgrade, 6 = noop
-      const type = rawData.charAt(0);
-      const jsonData = rawData.substring(1);
-      
-      // 处理 Socket.IO 协议消息
-      switch (type) {
-        case '0': // open - 连接打开
-          console.log('[Socket] 握手成功，SID:', jsonData.substring(0, 50));
-          socketConnected = true;
-          statusMsg = '已连接服务器';
-          break;
-          
-        case '2': // ping - 心跳（微信小游戏自动处理，无需手动响应）
-          console.log('[Socket] 心跳 ping');
-          break;
-          
-        case '3': // pong - 心跳响应
-          console.log('[Socket] 心跳 pong');
-          break;
-          
-        case '4': // message - 业务消息
-          try {
-            const data = JSON.parse(jsonData);
-            console.log('[Socket] 业务消息:', data.event);
-            handleServerMessage(data);
-          } catch (parseErr) {
-            console.error('[Socket] JSON 解析失败:', parseErr);
-          }
-          break;
-          
-        default:
-          console.log('[Socket] 未知类型:', type);
-      }
+      const data = JSON.parse(res.data);
+      console.log('[Socket] 解析成功:', data);
+      handleServerMessage(data);
     } catch (err) {
-      console.error('[Socket] 消息处理失败:', err);
+      console.error('[Socket] JSON 解析失败:', err, '原始数据:', res.data);
+      statusMsg = '数据解析错误';
     }
   });
   
-  wx.onSocketClose((res) => {
+  wx.onSocketClose(() => {
     socketConnected = false;
-    console.warn('[Socket] ❌ 连接关闭:', res);
-    statusMsg = '服务器断开，重连中...';
-    scheduleReconnect();
+    console.warn('[Socket] 连接关闭');
+    statusMsg = '服务器断开';
   });
-  
-  wx.onSocketError((err) => {
-    console.error('[Socket] 错误:', err);
-    statusMsg = '连接错误';
-  });
-}
-
-function scheduleReconnect() {
-  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    console.error('[Socket] 重连失败，已达最大次数');
-    statusMsg = '连接失败，请检查网络';
-    return;
-  }
-  
-  reconnectAttempts++;
-  console.log(`[Socket] ${RECONNECT_DELAY/1000}秒后第${reconnectAttempts}次重连...`);
-  
-  setTimeout(() => {
-    console.log('[Socket] 开始重连...');
-    connectServer();
-  }, RECONNECT_DELAY);
 }
 
 function send(event, payload = {}) {
   if (!socketConnected) {
     console.warn('[Socket] 连接未建立:', event);
-    statusMsg = '未连接服务器';
     return;
   }
-  
   const msg = { event, ...payload };
-  const msgStr = JSON.stringify(msg);
-  
-  console.log('[Socket] 准备发送:', event);
-  console.log('[Socket] 消息内容:', msgStr);
-  
-  try {
-    wx.sendSocketMessage({
-      data: msgStr,
-      success: () => {
-        console.log('[Socket] ✅ 发送成功:', event);
-        statusMsg = '已发送：' + event;
-      },
-      fail: (err) => {
-        console.error('[Socket] ❌ 发送失败:', event, err);
-        statusMsg = '发送失败';
-      }
-    });
-  } catch (err) {
-    console.error('[Socket] 发送异常:', err);
-    statusMsg = '发送错误';
-  }
+  console.log('[Socket] 发送:', msg);
+  wx.sendSocketMessage({
+    data: JSON.stringify(msg),
+    success: () => console.log('[Socket] 发送成功:', event),
+    fail: (err) => console.error('[Socket] 发送失败:', event, err)
+  });
 }
 
 function handleServerMessage(data) {
