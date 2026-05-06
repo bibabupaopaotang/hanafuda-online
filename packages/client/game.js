@@ -742,14 +742,24 @@ function connectServer() {
   });
   
   wx.onSocketMessage((res) => {
-    console.log('[Socket] 原始消息:', res.data);
+    const rawData = res.data;
     try {
-      const data = JSON.parse(res.data);
-      console.log('[Socket] 解析成功:', data);
-      handleServerMessage(data);
+      // Socket.IO 消息格式：类型 + JSON (0=open, 4=message)
+      const type = rawData.charAt(0);
+      const jsonData = rawData.substring(1);
+      
+      if (type === '0') {
+        // 握手消息
+        console.log('[Socket] 握手成功');
+        socketConnected = true;
+        statusMsg = '已连接服务器';
+      } else if (type === '4') {
+        // 业务消息
+        const data = JSON.parse(jsonData);
+        handleServerMessage(data);
+      }
     } catch (err) {
-      console.error('[Socket] JSON 解析失败:', err, '原始数据:', res.data);
-      statusMsg = '数据解析错误';
+      console.error('[Socket] 消息解析失败:', err, '数据:', rawData.substring(0, 100));
     }
   });
   
