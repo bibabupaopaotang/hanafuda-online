@@ -838,13 +838,17 @@ function showRoundResult(data) {
 }
 
 function promptJoin() {
-  wx.showPrompt({
+  // 微信小游戏使用 showModal + input 组件
+  // 简单方案：直接显示输入框提示
+  wx.showModal({
     title: '加入房间',
-    placeholder: '输入房间号',
+    content: '请输入房间号',
+    editable: true,
+    placeholderText: '房间号',
     success: (res) => {
-      if (res.confirm) {
-        myRoomId = res.trim();
-        send('join_room', { roomId: myRoomId });
+      if (res.confirm && res.content) {
+        myRoomId = res.content.trim();
+        send('join_room', myRoomId);
       }
     }
   });
