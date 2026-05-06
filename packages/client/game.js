@@ -755,10 +755,11 @@ function connectServer() {
   
   wx.onSocketMessage((res) => {
     const rawData = res.data;
-    console.log('[Socket] 收到消息:', rawData.substring(0, 100)); // 只打印前 100 字符
+    console.log('[Socket] 收到消息:', rawData.substring(0, 100));
     
     try {
       // Socket.IO 消息格式：类型 + JSON
+      // 0 = open, 1 = close, 2 = ping, 3 = pong, 4 = message, 5 = upgrade, 6 = noop
       const type = rawData.charAt(0);
       const jsonData = rawData.substring(1);
       
@@ -770,12 +771,12 @@ function connectServer() {
           statusMsg = '已连接服务器';
           break;
           
-        case '2': // ping - 心跳
-          // 自动响应 pong
-          wx.sendSocketMessage({ data: '3' });
+        case '2': // ping - 心跳（微信小游戏自动处理，无需手动响应）
+          console.log('[Socket] 心跳 ping');
           break;
           
         case '3': // pong - 心跳响应
+          console.log('[Socket] 心跳 pong');
           break;
           
         case '4': // message - 业务消息
@@ -830,20 +831,12 @@ function send(event, payload = {}) {
     console.warn('[Socket] 连接未建立:', event);
     return;
   }
-  
-  // Socket.IO 消息格式：4 + JSON
-  // 4 表示 message 类型
   const msg = { event, ...payload };
-  const messageData = '4' + JSON.stringify(msg);
-  
-  console.log('[Socket] 发送:', event, payload);
+  console.log('[Socket] 发送:', msg);
   wx.sendSocketMessage({
-    data: messageData,
+    data: JSON.stringify(msg),
     success: () => console.log('[Socket] 发送成功:', event),
-    fail: (err) => {
-      console.error('[Socket] 发送失败:', event, err);
-      statusMsg = '发送失败';
-    }
+    fail: (err) => console.error('[Socket] 发送失败:', event, err)
   });
 }
 
