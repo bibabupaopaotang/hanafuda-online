@@ -99,7 +99,7 @@ let myRoomId = '';
 let playerCount = 0;
 let gameState = null;
 let resultData = null;
-let statusMsg = '初始化中...';
+let statusMsg = '';
 let selectedCardId = null;
 let socketConnected = false;
 
@@ -374,27 +374,57 @@ function drawMenu(W, H) {
 function drawLobby(W, H) {
   drawBg();
 
+  const scale = Math.min(W / 1920, H / 1080);
+
   ctx.save();
   ctx.shadowColor = 'rgba(60,30,10,0.15)';
   ctx.shadowBlur = 6;
-  drawText('房间大厅', W / 2, H * 0.22, 40, COLORS.TEXT_DARK);
+  drawText('房间大厅', W / 2, H * 0.14, 40 * scale, COLORS.TEXT_DARK);
   ctx.restore();
 
   // 房间号
+  const roomBoxH = 56 * scale;
   ctx.fillStyle = COLORS.SAKURA_BG;
-  roundRect(W * 0.3, H * 0.32, W * 0.4, 60, 12);
+  roundRect(W * 0.3, H * 0.22, W * 0.4, roomBoxH, 12 * scale);
   ctx.fill();
   ctx.strokeStyle = COLORS.SAKURA;
-  ctx.lineWidth = 2;
-  roundRect(W * 0.3, H * 0.32, W * 0.4, 60, 12);
+  ctx.lineWidth = 2 * scale;
+  roundRect(W * 0.3, H * 0.22, W * 0.4, roomBoxH, 12 * scale);
   ctx.stroke();
-  drawText(myRoomId, W / 2, H * 0.39, 30, COLORS.SAKURA_DARK);
+  drawText(myRoomId, W / 2, H * 0.22 + roomBoxH * 0.62, 28 * scale, COLORS.SAKURA_DARK);
 
-  drawText('人数：' + playerCount + ' / 2', W / 2, H * 0.52, 26, COLORS.TEXT_DARK);
+  // 模式
+  const modeText = gameState?.mode === 'hachi_hachi' ? '三人模式' : '两人模式';
+  drawText(modeText, W / 2, H * 0.36, 20 * scale, COLORS.TEXT_MUTED);
 
-  const btnW = W * 0.4, btnH = 56;
-  drawBtn('开始游戏', W / 2 - btnW / 2, H * 0.62, btnW, btnH, COLORS.BTN_PRIMARY, () => send('start_game'));
-  drawBtn('返回', W / 2 - btnW / 2, H * 0.74, btnW, btnH, COLORS.TEXT_MUTED, () => {
+  // 人数
+  const maxP = gameState?.mode === 'hachi_hachi' ? 3 : 2;
+  drawText('人数：' + playerCount + ' / ' + maxP, W / 2, H * 0.46, 24 * scale, COLORS.TEXT_DARK);
+
+  // 玩家列表
+  if (gameState?.players) {
+    let py = H * 0.54;
+    gameState.players.forEach((p, i) => {
+      const isHost = (i === 0);
+      const isMe = (i === mySeatIndex);
+      const label = `${p.nickname}${isMe ? ' (你)' : ''}${isHost ? ' [房主]' : ''}`;
+      drawText(label, W / 2, py, 18 * scale, isMe ? COLORS.SAKURA_DARK : COLORS.TEXT_DARK);
+      py += 26 * scale;
+    });
+  }
+
+  // 按钮
+  const btnW = W * 0.32, btnH = 48 * scale;
+  const btnGap = 18 * scale;
+  const btnStartY = H * 0.72;
+
+  if (mySeatIndex === 0) {
+    drawBtn('开始游戏', W / 2 - btnW / 2, btnStartY, btnW, btnH, COLORS.BTN_PRIMARY, () => send('start_game'));
+  } else {
+    drawText('等待房主开始游戏', W / 2, btnStartY + btnH * 0.6, 18 * scale, COLORS.TEXT_MUTED);
+  }
+  drawBtn('离开房间', W / 2 - btnW / 2, btnStartY + btnH + btnGap, btnW, btnH, COLORS.BTN_DANGER, () => {
+    send('leave_room');
     currentState = STATE.MENU;
     render();
   });
@@ -506,9 +536,9 @@ function renderFieldArea(W, H, cw, ch) {
 
 // 场牌排列
 function renderFieldCards(x, y, w, h, field, cw, ch) {
-  const padding = 30;
+  const padding = 15;
   const availW = w - padding * 2;
-  const availH = h - padding * 2 - 30; // 顶部留空
+  const availH = h - padding * 2 - 35;
 
   // 根据场牌数量决定排列
   const count = field.length;
@@ -521,10 +551,9 @@ function renderFieldCards(x, y, w, h, field, cw, ch) {
   const gridW = availW / cols;
   const gridH = availH / rows;
 
-  const cardX = gridW * 0.15;
-  const cardY = gridH * 0.1;
-  const cardW = Math.min(cw, gridW * 0.7);
-  const cardH = Math.min(ch, gridH * 0.85);
+  // 增大卡牌占比：从 0.7/0.85 提升到 0.88/0.92
+  const cardW = Math.min(cw, gridW * 0.88);
+  const cardH = Math.min(ch, gridH * 0.92);
 
   field.forEach((id, i) => {
     const col = i % cols;
@@ -577,7 +606,7 @@ function renderTurnIndicator(W, H) {
   ctx.restore();
 
   drawText(
-    isMyTurn ? '✋ 你的回合' : '⏳ 对手思考中',
+    isMyTurn ? '你的回合' : '对手思考中',
     ix + iw / 2, iy + ih * 0.62, 18, '#fff'
   );
 }
@@ -633,29 +662,32 @@ function renderPlayerHand(W, H, hand, cw, ch, isMyTurn) {
 // --- 捕获区 ---
 function renderCapturedArea(W, H) {
   const fa = LAYOUT.areas.field;
-  const bottomY = H * (fa.y + fa.h) - 30 * Math.min(W / 1920, H / 1080);
-  const leftX = W * fa.x + 15;
-  const rightX = W * (fa.x + fa.w) - 15;
+  const scale = Math.min(W / 1920, H / 1080);
+  const bottomY = H * (fa.y + fa.h) - 20 * scale;
+  const leftX = W * fa.x + 20 * scale;
+  const rightX = W * (fa.x + fa.w) - 20 * scale;
 
   const myCaptured = gameState.captured?.[mySeatIndex] || [];
   const oppIdx = (mySeatIndex + 1) % 2;
   const oppCaptured = gameState.captured?.[oppIdx] || [];
 
-  // 对手捕获数
+  // 对手捕获数 - 加大标签
   if (oppCaptured.length > 0) {
-    const scale = Math.min(W / 1920, H / 1080);
-    const bw = 40 * scale, bh = 22 * scale;
+    const bw = 56 * scale, bh = 26 * scale;
+    ctx.save();
+    ctx.shadowColor = COLORS.SHADOW;
+    ctx.shadowBlur = 4;
     ctx.fillStyle = COLORS.TURN_OPP;
-    roundRect(leftX, bottomY - bh, bw, bh, 11);
+    roundRect(leftX, bottomY - bh, bw, bh, 13 * scale);
     ctx.fill();
-    drawText(`${oppCaptured.length}`, leftX + bw / 2, bottomY - bh * 0.25, 14 * scale, '#fff');
+    ctx.restore();
+    drawText(`${oppCaptured.length}张`, leftX + bw / 2, bottomY - bh * 0.32, 15 * scale, '#fff');
   }
 
-  // 玩家按月分组
+  // 玩家按月分组 - 加大圆圈
   if (myCaptured.length > 0) {
-    const scale = Math.min(W / 1920, H / 1080);
-    const circleR = 12 * scale;
-    const spacing = 26 * scale;
+    const circleR = 16 * scale;
+    const spacing = 32 * scale;
 
     // 按月分组计数
     const months = {};
@@ -667,27 +699,31 @@ function renderCapturedArea(W, H) {
     // 按月份排序
     const sortedMonths = Object.keys(months).map(Number).sort((a, b) => a - b);
 
-    // 从右向左排列
+    // 从右向左排列，加月份标签
     let cx = rightX;
     for (const m of sortedMonths) {
       const color = COLORS.MONTH_COLORS[m - 1] || '#888';
+
+      // 月份名称标签
+      ctx.fillStyle = COLORS.TEXT_MUTED;
+      ctx.font = `${10 * scale}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`${m}月`, cx, bottomY - circleR * 2 - 6 * scale);
+
       ctx.save();
       ctx.shadowColor = COLORS.SHADOW;
-      ctx.shadowBlur = 3;
+      ctx.shadowBlur = 4;
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(cx, bottomY - circleR, circleR, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
 
+      // 数量显示
       ctx.fillStyle = '#fff';
-      ctx.font = `bold ${11 * scale}px sans-serif`;
+      ctx.font = `bold ${13 * scale}px sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(`${m}`, cx, bottomY - circleR + 4 * scale);
-
-      ctx.fillStyle = '#fff';
-      ctx.font = `9px sans-serif`;
-      ctx.fillText(`×${months[m]}`, cx, bottomY - circleR + 14 * scale);
+      ctx.fillText(`×${months[m]}`, cx, bottomY - circleR + 5 * scale);
 
       cx -= spacing;
     }
@@ -1225,6 +1261,7 @@ function connectServer() {
           console.log('[Socket] Socket.IO 已连接');
           socketConnected = true;
           statusMsg = '已连接服务器';
+          setTimeout(() => { statusMsg = ''; render(); }, 2000);
         } else if (subType === '2') {
           // 事件消息: 42["event_name", {payload}]
           const payload = rawData.substring(2);
@@ -1418,7 +1455,7 @@ function renderTestMode(W, H, cw, ch) {
 
   // 场牌排列
   if (testModeState.field.length > 0) {
-    const padding = 30;
+    const padding = 15;
     const field = testModeState.field;
     const count = field.length;
     let cols, rows;
@@ -1427,9 +1464,9 @@ function renderTestMode(W, H, cw, ch) {
     else { cols = 4; rows = 3; }
 
     const gridW = (fW - padding * 2) / cols;
-    const gridH = (fH - padding * 2 - 30) / rows;
-    const cardW = Math.min(fcW, gridW * 0.7);
-    const cardH = Math.min(fcH, gridH * 0.85);
+    const gridH = (fH - padding * 2 - 35) / rows;
+    const cardW = Math.min(fcW, gridW * 0.88);
+    const cardH = Math.min(fcH, gridH * 0.92);
 
     field.forEach((id, i) => {
       const col = i % cols, row = Math.floor(i / cols);
@@ -1478,26 +1515,28 @@ function renderTestMode(W, H, cw, ch) {
     }
     const sortedMonths = Object.keys(months).map(Number).sort((a, b) => a - b);
 
-    const rightX = W * (fa.x + fa.w) - 15;
-    const bottomY = H * (fa.y + fa.h) - 30 * scale;
-    const circleR = 12 * scale;
-    const spacing = 26 * scale;
+    const rightX = W * (fa.x + fa.w) - 20 * scale;
+    const bottomY = H * (fa.y + fa.h) - 20 * scale;
+    const circleR = 16 * scale;
+    const spacing = 32 * scale;
     let cx = rightX;
 
     for (const m of sortedMonths) {
       const color = COLORS.MONTH_COLORS[m - 1] || '#888';
+      ctx.fillStyle = COLORS.TEXT_MUTED;
+      ctx.font = `${10 * scale}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`${m}月`, cx, bottomY - circleR * 2 - 6 * scale);
+
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(cx, bottomY - circleR, circleR, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = '#fff';
-      ctx.font = `bold ${11 * scale}px sans-serif`;
+      ctx.font = `bold ${13 * scale}px sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(`${m}`, cx, bottomY - circleR + 4 * scale);
-
-      ctx.font = `9px sans-serif`;
-      ctx.fillText(`×${months[m]}`, cx, bottomY - circleR + 14 * scale);
+      ctx.fillText(`×${months[m]}`, cx, bottomY - circleR + 5 * scale);
       cx -= spacing;
     }
   }
