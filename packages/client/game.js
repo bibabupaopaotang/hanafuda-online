@@ -1193,48 +1193,61 @@ function connectServer() {
   });
 
   wx.onSocketOpen(() => {
-    socketConnected = true;
-    console.log('[Socket] 已连接');
-    statusMsg = '已连接服务器';
+    console.log('[Socket] WebSocket 已打开，等待 Socket.IO 握手...');
   });
 
   wx.onSocketMessage((res) => {
     const rawData = res.data;
-    console.log('[Socket] 原始消息:', rawData.substring(0, 200));
+    console.log('[Socket] 原始消息:', rawData.substring(0, 300));
 
     try {
       const type = rawData.charAt(0);
 
       if (type === '0') {
-        // Socket.IO 握手 (open)
-        console.log('[Socket] 握手成功');
-        socketConnected = true;
-        statusMsg = '已连接服务器';
+        // Engine.IO open 帧: 0{"sid":"...","upgrades":[],"pingInterval":...}
+        console.log('[Socket] Engine.IO 握手成功');
+        // 发送 probe 完成握手
+        wx.sendSocketMessage({ data: '2probe' });
+      } else if (type === '3') {
+        // Engine.IO pong/probe 回复
+        // 如果是 probe 回复，发送 5 完成升级
+        if (rawData === '3probe') {
+          console.log('[Socket] Probe 回复，发送升级确认');
+          wx.sendSocketMessage({ data: '5' });
+          // 发送 Socket.IO 连接帧
+          wx.sendSocketMessage({ data: '40' });
+        }
+        // 其他 pong 忽略
+      } else if (type === '1') {
+        // close
+        console.warn('[Socket] 服务器关闭连接');
+      } else if (type === '2') {
+        // Engine.IO ping → 回复 pong
+        wx.sendSocketMessage({ data: '3' });
       } else if (type === '4') {
         // Socket.IO 消息，格式: 42["event", payload] 或 40 (connect)
         const subType = rawData.charAt(1);
 
-        if (subType === '2') {
+        if (subType === '0') {
+          // Socket.IO 连接确认 (40)
+          console.log('[Socket] Socket.IO 已连接');
+          socketConnected = true;
+          statusMsg = '已连接服务器';
+        } else if (subType === '2') {
           // 事件消息: 42["event_name", {payload}]
-          const payload = rawData.substring(2); // 去掉 "42"
+          const payload = rawData.substring(2);
           const arr = JSON.parse(payload);
           const event = arr[0];
           const data = arr[1] || {};
           console.log('[Socket] 事件:', event);
           handleServerMessage({ event, ...data });
-        } else if (subType === '0') {
-          // 命名空间连接: 40
-          console.log('[Socket] 命名空间连接');
+        } else if (subType === '6') {
+          // noop (46)
         } else {
-          console.log('[Socket] 未知子类型:', subType);
+          console.log('[Socket] 未知子类型:', subType, '数据:', rawData.substring(0, 100));
         }
-      } else if (type === '2') {
-        // ping → 回复 pong
-        wx.sendSocketMessage({ data: '3' });
-      } else if (type === '3') {
-        // pong (服务器回复)
       } else {
-        console.log('[Socket] 未知类型:', type);
+        console.log('[Socket] 未知类型:', type, '数据:', rawData.substring(0, 100));
       }
     } catch (err) {
       console.error('[Socket] 解析失败:', err, '数据:', rawData.substring(0, 200));
