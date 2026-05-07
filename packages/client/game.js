@@ -306,18 +306,17 @@ function drawCardRaw(x, y, id, w, h, options = {}) {
 
   if (id === null || id === undefined) {
     // 牌背
-    if (cardBackImg && _cardImgStatus['back']) {
+    if (cardBackImg && _cardImgStatus['back'] === true) {
       ctx.drawImage(cardBackImg, dx, dy, finalW, finalH);
     } else {
       _drawCardFallback(dx, dy, finalW, finalH, '#3A6B35', '裏');
     }
   } else {
-    // 牌面 - 检查图片是否加载成功
-    const img = cardImages[id];
-    if (img && _cardImgStatus[id]) {
-      ctx.drawImage(img, dx, dy, finalW, finalH);
+    // 牌面 - 只有图片确认加载成功才画 drawImage
+    if (_cardImgStatus[id] === true) {
+      ctx.drawImage(cardImages[id], dx, dy, finalW, finalH);
     } else {
-      // 回退：绘制带月份名称的卡片
+      // 回退：绘制带月份名称的文字卡片
       const month = Math.floor(id / 4) + 1;
       const name = CARD_NAMES[id] || `${month}月`;
       const monthColors = ['#87CEEB','#FF80AB','#87CEEB','#A9A9A9',
@@ -351,30 +350,73 @@ function drawCardRaw(x, y, id, w, h, options = {}) {
 
 // 卡牌回退绘制（带颜色的文字卡片）
 function _drawCardFallback(dx, dy, w, h, color, text) {
-  const r = 6;
+  const r = Math.min(6, w * 0.08);
+  // 圆角矩形背景
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,0.15)';
   ctx.shadowBlur = 4;
+  ctx.shadowOffsetY = 2;
   ctx.fillStyle = '#FFFDF5';
-  roundRect(dx, dy, w, h, r);
+  ctx.beginPath();
+  ctx.moveTo(dx + r, dy);
+  ctx.lineTo(dx + w - r, dy);
+  ctx.arcTo(dx + w, dy, dx + w, dy + r, r);
+  ctx.lineTo(dx + w, dy + h - r);
+  ctx.arcTo(dx + w, dy + h, dx + w - r, dy + h, r);
+  ctx.lineTo(dx + r, dy + h);
+  ctx.arcTo(dx, dy + h, dx, dy + h - r, r);
+  ctx.lineTo(dx, dy + r);
+  ctx.arcTo(dx, dy, dx + r, dy, r);
+  ctx.closePath();
   ctx.fill();
   ctx.restore();
 
   // 顶部色带
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(dx + r, dy);
+  ctx.lineTo(dx + w - r, dy);
+  ctx.arcTo(dx + w, dy, dx + w, dy + r, r);
+  ctx.lineTo(dx + w, dy + h * 0.35);
+  ctx.lineTo(dx, dy + h * 0.35);
+  ctx.lineTo(dx, dy + r);
+  ctx.arcTo(dx, dy, dx + r, dy, r);
+  ctx.closePath();
   ctx.fillStyle = color;
-  roundRect(dx, dy, w, h * 0.35, r);
   ctx.fill();
+  ctx.restore();
 
-  // 文字
+  // 牌名文字（分行显示）
   ctx.fillStyle = '#3C2415';
-  ctx.font = `bold ${Math.max(10, w * 0.16)}px sans-serif`;
+  const fontSize = Math.max(8, Math.min(w * 0.18, h * 0.1));
+  ctx.font = `bold ${fontSize}px sans-serif`;
   ctx.textAlign = 'center';
-  ctx.fillText(text, dx + w / 2, dy + h * 0.65);
+  ctx.textBaseline = 'middle';
+
+  // 月份 + 类型分行
+  const month = Math.floor(text.charAt(0)) || '?';
+  const shortName = text.includes('月') ? text.substring(0, 2) : text.substring(0, 4);
+  ctx.fillText(shortName, dx + w / 2, dy + h * 0.55);
+
+  // 底部小字
+  ctx.font = `${fontSize * 0.7}px sans-serif`;
+  ctx.fillStyle = '#8C7B6B';
+  ctx.fillText(text, dx + w / 2, dy + h * 0.75);
 
   // 边框
-  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
   ctx.lineWidth = 1;
-  roundRect(dx, dy, w, h, r);
+  ctx.beginPath();
+  ctx.moveTo(dx + r, dy);
+  ctx.lineTo(dx + w - r, dy);
+  ctx.arcTo(dx + w, dy, dx + w, dy + r, r);
+  ctx.lineTo(dx + w, dy + h - r);
+  ctx.arcTo(dx + w, dy + h, dx + w - r, dy + h, r);
+  ctx.lineTo(dx + r, dy + h);
+  ctx.arcTo(dx, dy + h, dx, dy + h - r, r);
+  ctx.lineTo(dx, dy + r);
+  ctx.arcTo(dx, dy, dx + r, dy, r);
+  ctx.closePath();
   ctx.stroke();
 }
 
