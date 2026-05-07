@@ -242,15 +242,41 @@ export function endRound(state: GameState): GameState {
   };
 }
 
-/** 换人 */
+/** 换人（含手牌补充） */
 export function nextPlayer(state: GameState): GameState {
   const playerCount = state.players.length;
-  const nextIndex = (state.currentPlayerIndex + 1) % playerCount;
 
-  if (state.hands[state.currentPlayerIndex].length === 0 && state.deck.length === 0) {
-    return { ...state, phase: GamePhase.RoundEnd };
+  // 检查是否所有玩家手牌都为空
+  const allEmpty = state.players.every((_, i) => state.hands[i].length === 0);
+
+  if (allEmpty) {
+    if (state.deck.length === 0) {
+      // 山札也空 → 回合结束
+      return { ...state, phase: GamePhase.RoundEnd };
+    }
+
+    // 山札有牌 → 补充手牌，平均分配
+    const newHands = state.hands.map(() => [] as number[]);
+    const newDeck = [...state.deck];
+    const perPlayer = Math.min(8, Math.floor(newDeck.length / playerCount));
+
+    for (let i = 0; i < playerCount; i++) {
+      for (let j = 0; j < perPlayer; j++) {
+        newHands[i].push(newDeck.pop()!);
+      }
+    }
+
+    return {
+      ...state,
+      phase: GamePhase.PlayerTurn,
+      currentPlayerIndex: 0, // 重新从亲家开始
+      hands: newHands,
+      deck: newDeck,
+      lastActionSeq: state.lastActionSeq + 1,
+    };
   }
 
+  const nextIndex = (state.currentPlayerIndex + 1) % playerCount;
   return {
     ...state,
     phase: GamePhase.PlayerTurn,
