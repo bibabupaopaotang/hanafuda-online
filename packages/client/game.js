@@ -1200,23 +1200,44 @@ function connectServer() {
 
   wx.onSocketMessage((res) => {
     const rawData = res.data;
+    console.log('[Socket] 原始消息:', rawData.substring(0, 200));
 
     try {
       const type = rawData.charAt(0);
-      const jsonData = rawData.substring(1);
 
       if (type === '0') {
+        // Socket.IO 握手 (open)
+        console.log('[Socket] 握手成功');
         socketConnected = true;
         statusMsg = '已连接服务器';
       } else if (type === '4') {
-        const data = JSON.parse(jsonData);
-        handleServerMessage(data);
+        // Socket.IO 消息，格式: 42["event", payload] 或 40 (connect)
+        const subType = rawData.charAt(1);
+
+        if (subType === '2') {
+          // 事件消息: 42["event_name", {payload}]
+          const payload = rawData.substring(2); // 去掉 "42"
+          const arr = JSON.parse(payload);
+          const event = arr[0];
+          const data = arr[1] || {};
+          console.log('[Socket] 事件:', event);
+          handleServerMessage({ event, ...data });
+        } else if (subType === '0') {
+          // 命名空间连接: 40
+          console.log('[Socket] 命名空间连接');
+        } else {
+          console.log('[Socket] 未知子类型:', subType);
+        }
       } else if (type === '2') {
-        // ping - 自动响应
+        // ping → 回复 pong
         wx.sendSocketMessage({ data: '3' });
+      } else if (type === '3') {
+        // pong (服务器回复)
+      } else {
+        console.log('[Socket] 未知类型:', type);
       }
     } catch (err) {
-      console.error('[Socket] 解析失败:', err);
+      console.error('[Socket] 解析失败:', err, '数据:', rawData.substring(0, 200));
     }
   });
 
@@ -1227,15 +1248,17 @@ function connectServer() {
   });
 }
 
-function send(event, payload = {}) {
+function send(event, payload) {
   if (!socketConnected) {
     console.warn('[Socket] 连接未建立:', event);
     return;
   }
-  const msg = { event, ...payload };
-  console.log('[Socket] 发送:', msg);
+  // Socket.IO 协议: 42["event", payload]
+  const data = payload !== undefined ? [event, payload] : [event];
+  const framed = '42' + JSON.stringify(data);
+  console.log('[Socket] 发送:', event, payload);
   wx.sendSocketMessage({
-    data: JSON.stringify(msg),
+    data: framed,
     success: () => console.log('[Socket] 发送成功:', event),
     fail: (err) => console.error('[Socket] 发送失败:', event, err)
   });
