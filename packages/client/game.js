@@ -118,28 +118,62 @@ let cardImages = {};
 let cardBackImg = null;
 let _cardPositions = {}; // 记录每张手牌的屏幕位置
 
+// ================= 卡牌名称表 =================
+const CARD_NAMES = [
+  '松に鶴(光)','赤短(松)','松に小鳥','松のみ',
+  '梅に鴬','赤短(梅)','梅のみ','梅のみ',
+  '桜に幕(光)','赤短(桜)','桜のみ','桜のみ',
+  '紫短(藤)','藤に燕','藤のみ','藤のみ',
+  '青短(菖蒲)','菖蒲に八橋','菖蒲のみ','菖蒲のみ',
+  '青短(牡丹)','牡丹に蝶','牡丹のみ','牡丹のみ',
+  '青短(萩)','萩に猪','萩のみ','萩のみ',
+  '孟蘭に小野道風','赤短(芒)','芒のみ','芒のみ',
+  '菊に盃(光)','菊に句','菊のみ','菊のみ',
+  '紅葉に鹿(光)','紅葉に句','紅葉のみ','紅葉のみ',
+  '柳に小野道風(光)','柳に燕','柳のみ','柳のみ',
+  '桐に鳳凰(光)','桐に句','桐のみ','桐のみ',
+];
+
+// 卡牌图片加载状态
+const _cardImgStatus = {}; // { 0: true, 1: false, ... }
+
 // ================= 加载卡牌图片 =================
 function loadCardImages(callback) {
   let loaded = 0;
+  let loadedOk = 0;
+  let loadedFail = 0;
   const total = 49;
 
   function onCardLoad() {
     loaded++;
-    if (loaded >= total && callback) callback();
+    if (loaded >= total) {
+      console.log(`[资源] 图片加载完成: ${loadedOk}成功, ${loadedFail}失败, 共${total}张`);
+      if (callback) callback();
+    }
   }
 
   for (let i = 0; i < 48; i++) {
     const img = wx.createImage();
-    img.onload = onCardLoad;
-    img.onerror = () => { loaded++; };
-    img.src = './assets/cards/card_' + String(i).padStart(2, '0') + '.png';
+    img.onload = () => { _cardImgStatus[i] = true; loadedOk++; onCardLoad(); };
+    img.onerror = (e) => {
+      _cardImgStatus[i] = false;
+      loadedFail++;
+      console.warn(`[卡牌] card_${String(i).padStart(2, '0')}.png 加载失败`);
+      onCardLoad();
+    };
+    img.src = 'assets/cards/card_' + String(i).padStart(2, '0') + '.png';
     cardImages[i] = img;
   }
 
   cardBackImg = wx.createImage();
-  cardBackImg.onload = onCardLoad;
-  cardBackImg.onerror = () => { loaded++; };
-  cardBackImg.src = './assets/cards/card_back.png';
+  cardBackImg.onload = () => { _cardImgStatus['back'] = true; loadedOk++; onCardLoad(); };
+  cardBackImg.onerror = (e) => {
+    _cardImgStatus['back'] = false;
+    loadedFail++;
+    console.warn('[卡牌] card_back.png 加载失败');
+    onCardLoad();
+  };
+  cardBackImg.src = 'assets/cards/card_back.png';
 
   setTimeout(() => {
     if (callback && loaded < total) {
@@ -272,18 +306,24 @@ function drawCardRaw(x, y, id, w, h, options = {}) {
 
   if (id === null || id === undefined) {
     // 牌背
-    if (cardBackImg) {
+    if (cardBackImg && _cardImgStatus['back']) {
       ctx.drawImage(cardBackImg, dx, dy, finalW, finalH);
     } else {
-      ctx.fillStyle = '#2E7D32';
-      roundRect(dx, dy, finalW, finalH, 6);
-      ctx.fill();
+      _drawCardFallback(dx, dy, finalW, finalH, '#3A6B35', '裏');
     }
   } else {
-    // 牌面
+    // 牌面 - 检查图片是否加载成功
     const img = cardImages[id];
-    if (img) {
+    if (img && _cardImgStatus[id]) {
       ctx.drawImage(img, dx, dy, finalW, finalH);
+    } else {
+      // 回退：绘制带月份名称的卡片
+      const month = Math.floor(id / 4) + 1;
+      const name = CARD_NAMES[id] || `${month}月`;
+      const monthColors = ['#87CEEB','#FF80AB','#87CEEB','#A9A9A9',
+                           '#FF7043','#EC407A','#8D6E63','#FFD54F',
+                           '#A1887F','#66BB6A','#EF5350','#E91E63'];
+      _drawCardFallback(dx, dy, finalW, finalH, monthColors[month - 1], name);
     }
   }
 
@@ -307,6 +347,35 @@ function drawCardRaw(x, y, id, w, h, options = {}) {
     roundRect(dx - 1, dy - 1, finalW + 2, finalH + 2, 7);
     ctx.stroke();
   }
+}
+
+// 卡牌回退绘制（带颜色的文字卡片）
+function _drawCardFallback(dx, dy, w, h, color, text) {
+  const r = 6;
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.15)';
+  ctx.shadowBlur = 4;
+  ctx.fillStyle = '#FFFDF5';
+  roundRect(dx, dy, w, h, r);
+  ctx.fill();
+  ctx.restore();
+
+  // 顶部色带
+  ctx.fillStyle = color;
+  roundRect(dx, dy, w, h * 0.35, r);
+  ctx.fill();
+
+  // 文字
+  ctx.fillStyle = '#3C2415';
+  ctx.font = `bold ${Math.max(10, w * 0.16)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText(text, dx + w / 2, dy + h * 0.65);
+
+  // 边框
+  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+  ctx.lineWidth = 1;
+  roundRect(dx, dy, w, h, r);
+  ctx.stroke();
 }
 
 // ================= 渲染入口 =================
