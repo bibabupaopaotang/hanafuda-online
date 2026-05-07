@@ -1170,7 +1170,7 @@ canvas.addEventListener('touchend', (e) => {
       // 触发飞行动画
       playCardWithAnimation(cardId, () => {
         // 动画完成后发送网络消息
-        send('play_card', { cardId });
+        send('play_card', cardId);
         statusMsg = `打出卡牌`;
       });
     }
@@ -1206,18 +1206,10 @@ function connectServer() {
       if (type === '0') {
         // Engine.IO open 帧: 0{"sid":"...","upgrades":[],"pingInterval":...}
         console.log('[Socket] Engine.IO 握手成功');
-        // 发送 probe 完成握手
-        wx.sendSocketMessage({ data: '2probe' });
+        // 直接发送 Socket.IO connect 帧（不需要 probe 升级，因为 WebSocket 已是唯一传输）
+        wx.sendSocketMessage({ data: '40' });
       } else if (type === '3') {
-        // Engine.IO pong/probe 回复
-        // 如果是 probe 回复，发送 5 完成升级
-        if (rawData === '3probe') {
-          console.log('[Socket] Probe 回复，发送升级确认');
-          wx.sendSocketMessage({ data: '5' });
-          // 发送 Socket.IO 连接帧
-          wx.sendSocketMessage({ data: '40' });
-        }
-        // 其他 pong 忽略
+        // Engine.IO pong - 保持心跳
       } else if (type === '1') {
         // close
         console.warn('[Socket] 服务器关闭连接');
@@ -1284,14 +1276,16 @@ function handleServerMessage(data) {
       statusMsg = '游戏进行中';
       break;
     case 'room_created':
-      myRoomId = data.roomId;
-      playerCount = data.playerCount || 1;
+      myRoomId = data.room?.id || data.roomId;
+      playerCount = data.room?.players?.length || 1;
+      mySeatIndex = data.mySeatIndex || 0;
       statusMsg = `房间已创建: ${myRoomId}`;
       currentState = STATE.LOBBY;
       break;
     case 'room_joined':
-      myRoomId = data.roomId;
-      playerCount = data.playerCount;
+      myRoomId = data.room?.id || data.roomId;
+      playerCount = data.room?.players?.length || 1;
+      mySeatIndex = data.mySeatIndex || 0;
       statusMsg = `已加入: ${myRoomId}`;
       currentState = STATE.LOBBY;
       break;
@@ -1300,6 +1294,16 @@ function handleServerMessage(data) {
       currentState = STATE.GAME;
       gameState = data.state;
       statusMsg = '游戏开始！';
+      break;
+    case 'player_joined':
+      playerCount = data.room?.players?.length || playerCount;
+      statusMsg = '玩家已加入！';
+      break;
+    case 'state_update':
+      gameState = data.state;
+      if (data.koiCount !== undefined) {
+        statusMsg = `Koi ×${data.koiCount}`;
+      }
       break;
     case 'yaku_found':
       currentState = STATE.POPUP;
@@ -1310,7 +1314,10 @@ function handleServerMessage(data) {
       popupState.animIn = true;
       startAnimLoop();
       break;
-    case 'round_result':
+    case 'round_end':
+      showRoundResult(data);
+      break;
+    case 'game_end':
       showRoundResult(data);
       break;
     case 'error':
@@ -1324,7 +1331,14 @@ function handleServerMessage(data) {
 
 function showRoundResult(data) {
   currentState = STATE.RESULT;
-  resultData = data;
+  // 统一字段：服务器发送 totalScores，客户端期望 scores
+  resultData = {
+    scores: data.totalScores || data.scores,
+    roundScores: data.roundScores,
+    winner: data.winner,
+    gameOver: data.gameOver,
+    yaku: data.yaku,
+  };
   render();
 }
 
@@ -1336,7 +1350,7 @@ function promptJoin() {
     placeholderText: '房间号',
     success: (res) => {
       if (res.confirm && res.content) {
-        send('join_room', { roomId: res.content.trim() });
+        send('join_room', res.content.trim());
       }
     }
   });
