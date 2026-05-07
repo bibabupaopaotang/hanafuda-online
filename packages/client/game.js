@@ -448,8 +448,8 @@ function renderGameScene(W, H, cw, ch) {
   // --- 2. 对手手牌 ---
   renderOpponentHand(W, H, oppIdx);
 
-  // --- 3. 场牌区 ---
-  renderFieldArea(W, H, cw, ch);
+  // --- 3. 主区域：左侧场牌(2/3) + 右侧捕获(1/3) ---
+  renderFieldAndCaptured(W, H, cw, ch);
 
   // --- 4. 飞行动画卡牌 ---
   renderFlyingCards(W, H, cw, ch);
@@ -459,6 +459,11 @@ function renderGameScene(W, H, cw, ch) {
 
   // --- 6. 底部状态栏 ---
   renderStatusBar(W, H, oppIdx, isMyTurn);
+
+  // --- 调试信息：回合状态 ---
+  const scale = Math.min(W / 1920, H / 1080);
+  const debugText = `我的座位:${mySeatIndex} | 当前回合:${gameState.currentPlayerIndex} | ${isMyTurn ? '可以出牌' : '等待中'}`;
+  drawText(debugText, W * 0.5, H * 0.17, 13 * scale, isMyTurn ? COLORS.TURN_MY : COLORS.URGENCY);
 }
 
 // --- 顶部栏 ---
@@ -499,48 +504,73 @@ function renderOpponentHand(W, H, oppIdx) {
   }
 }
 
-// --- 场牌区 ---
-function renderFieldArea(W, H, cw, ch) {
-  const a = LAYOUT.areas.field;
-  const x = W * a.x, y = H * a.y, w = W * a.w, h = H * a.h;
+// --- 主区域：场牌(左2/3) + 捕获区(右1/3) ---
+function renderFieldAndCaptured(W, H, cw, ch) {
+  const scale = Math.min(W / 1920, H / 1080);
+  const mainY = H * 0.19;
+  const mainH = H * 0.48;
+  const mainX = W * 0.05;
+  const mainW = W * 0.9;
+
+  const fieldW = mainW * 0.66;  // 2/3 for field
+  const capturedW = mainW * 0.33;  // 1/3 for captured
+
+  // === 左侧：场牌区 ===
+  const fx = mainX;
+  const fy = mainY;
+  const fw = fieldW - 10 * scale;  // gap
+  const fh = mainH;
 
   // 场牌背景
-  ctx.fillStyle = 'rgba(200,184,150,0.4)';
-  roundRect(x, y, w, h, 20);
+  ctx.fillStyle = 'rgba(200,184,150,0.35)';
+  roundRect(fx, fy, fw, fh, 16 * scale);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(60,30,10,0.15)';
-  ctx.lineWidth = 2;
-  roundRect(x, y, w, h, 20);
+  ctx.strokeStyle = 'rgba(60,30,10,0.12)';
+  ctx.lineWidth = 1.5 * scale;
+  roundRect(fx, fy, fw, fh, 16 * scale);
   ctx.stroke();
 
-  // 场牌 - 动态网格
   const field = gameState.field || [];
   const fcW = cw * LAYOUT.cardSizes.field;
   const fcH = ch * LAYOUT.cardSizes.field;
 
   if (field.length === 0) {
-    drawText('场牌区', x + w / 2, y + h / 2, 22, COLORS.TEXT_MUTED);
+    drawText('场牌区', fx + fw / 2, fy + fh / 2, 20 * scale, COLORS.TEXT_MUTED);
   } else {
-    renderFieldCards(x, y, w, h, field, fcW, fcH);
+    renderFieldCards(fx, fy, fw, fh, field, fcW, fcH);
   }
 
-  // 山札（右上角）
-  renderMountain(W, H);
+  // 山札（场牌区右上角）
+  renderMountainAt(fx + fw - 45 * scale, fy + 8 * scale, scale);
 
-  // 回合指示器
-  renderTurnIndicator(W, H);
+  // 回合指示器（场牌区顶部居中）
+  renderTurnIndicatorAt(fx + fw / 2 - 80 * scale, fy + 4 * scale, scale);
 
-  // 捕获区
-  renderCapturedArea(W, H);
+  // === 右侧：捕获区 ===
+  const cx = fx + fw + 10 * scale;
+  const cy = mainY;
+  const cw2 = capturedW;
+  const ch2 = mainH;
+
+  // 捕获区背景
+  ctx.fillStyle = 'rgba(253,242,248,0.5)';
+  roundRect(cx, cy, cw2, ch2, 16 * scale);
+  ctx.fill();
+  ctx.strokeStyle = COLORS.SAKURA_LIGHT;
+  ctx.lineWidth = 1.5 * scale;
+  roundRect(cx, cy, cw2, ch2, 16 * scale);
+  ctx.stroke();
+
+  renderCapturedSide(cx, cy, cw2, ch2, scale);
 }
 
 // 场牌排列
 function renderFieldCards(x, y, w, h, field, cw, ch) {
-  const padding = 15;
+  const padding = 12;
   const availW = w - padding * 2;
-  const availH = h - padding * 2 - 35;
+  const availH = h - padding * 2 - 40; // top space for mountain + turn indicator
 
-  // 根据场牌数量决定排列
+  // 平铺：根据场牌数量决定排列
   const count = field.length;
   let cols, rows;
 
@@ -551,16 +581,15 @@ function renderFieldCards(x, y, w, h, field, cw, ch) {
   const gridW = availW / cols;
   const gridH = availH / rows;
 
-  // 增大卡牌占比：从 0.7/0.85 提升到 0.88/0.92
-  const cardW = Math.min(cw, gridW * 0.88);
-  const cardH = Math.min(ch, gridH * 0.92);
+  const cardW = Math.min(cw, gridW * 0.85);
+  const cardH = Math.min(ch, gridH * 0.88);
 
   field.forEach((id, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
-    const cx = x + padding + col * gridW + (gridW - cardW) / 2;
-    const cy = y + 25 + row * gridH + (gridH - cardH) / 2;
-    drawCardRaw(cx, cy, id, cardW, cardH);
+    const cardX = x + padding + col * gridW + (gridW - cardW) / 2;
+    const cardY = y + 38 + row * gridH + (gridH - cardH) / 2;
+    drawCardRaw(cardX, cardY, id, cardW, cardH);
   });
 }
 
@@ -609,6 +638,138 @@ function renderTurnIndicator(W, H) {
     isMyTurn ? '你的回合' : '对手思考中',
     ix + iw / 2, iy + ih * 0.62, 18, '#fff'
   );
+}
+
+// --- 山札（位置指定版） ---
+function renderMountainAt(mx, my, scale) {
+  const deckCount = gameState.deck?.length || 0;
+  const mw = 60 * scale, mh = 75 * scale;
+
+  ctx.save();
+  ctx.shadowColor = COLORS.SHADOW;
+  ctx.shadowBlur = 4 * scale;
+  ctx.fillStyle = '#5D4037';
+  roundRect(mx, my, mw, mh, 6 * scale);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.strokeStyle = '#795548';
+  ctx.lineWidth = 1.5 * scale;
+  roundRect(mx, my, mw, mh, 6 * scale);
+  ctx.stroke();
+
+  drawText('山札', mx + mw / 2, my + mh * 0.38, 12 * scale, '#FFF8E1');
+  drawText(String(deckCount), mx + mw / 2, my + mh * 0.65, 16 * scale, COLORS.GOLD);
+}
+
+// --- 回合指示器（位置指定版） ---
+function renderTurnIndicatorAt(ix, iy, scale) {
+  if (!gameState) return;
+  const isMyTurn = (gameState.currentPlayerIndex === mySeatIndex);
+
+  const iw = 140 * scale, ih = 28 * scale;
+
+  ctx.save();
+  ctx.shadowColor = isMyTurn ? 'rgba(74,140,92,0.4)' : 'rgba(201,123,90,0.4)';
+  ctx.shadowBlur = 8 * scale;
+  ctx.fillStyle = isMyTurn ? COLORS.TURN_MY : COLORS.TURN_OPP;
+  roundRect(ix, iy, iw, ih, 14 * scale);
+  ctx.fill();
+  ctx.restore();
+
+  drawText(
+    isMyTurn ? '你的回合' : '对手回合',
+    ix + iw / 2, iy + ih * 0.65, 14 * scale, '#fff'
+  );
+}
+
+// --- 侧边捕获区显示 ---
+function renderCapturedSide(x, y, w, h, scale) {
+  const oppIdx = (mySeatIndex + 1) % 2;
+  const oppCaptured = gameState.captured?.[oppIdx] || [];
+  const myCaptured = gameState.captured?.[mySeatIndex] || [];
+
+  const padding = 12 * scale;
+
+  // 标题
+  drawText('捕获区', x + w / 2, y + 18 * scale, 14 * scale, COLORS.TEXT_MUTED);
+
+  // 对手捕获（上方）
+  const sectionH = (h - 30 * scale) / 2;
+
+  ctx.fillStyle = 'rgba(201,123,90,0.08)';
+  roundRect(x + padding, y + 28 * scale, w - padding * 2, sectionH - 6 * scale, 10 * scale);
+  ctx.fill();
+
+  drawText('对手', x + w / 2, y + 44 * scale, 12 * scale, COLORS.TURN_OPP);
+
+  if (oppCaptured.length > 0) {
+    renderMonthCircles(x + padding + 4 * scale, y + 54 * scale, w - padding * 2 - 8 * scale, sectionH - 36 * scale, oppCaptured, scale, false);
+  } else {
+    drawText('无', x + w / 2, y + 68 * scale, 11 * scale, COLORS.TEXT_MUTED);
+  }
+
+  // 我的捕获（下方）
+  ctx.fillStyle = 'rgba(74,140,92,0.08)';
+  roundRect(x + padding, y + sectionH + 30 * scale, w - padding * 2, sectionH - 6 * scale, 10 * scale);
+  ctx.fill();
+
+  drawText('我的', x + w / 2, y + sectionH + 46 * scale, 12 * scale, COLORS.TURN_MY);
+
+  if (myCaptured.length > 0) {
+    renderMonthCircles(x + padding + 4 * scale, y + sectionH + 56 * scale, w - padding * 2 - 8 * scale, sectionH - 36 * scale, myCaptured, scale, true);
+  } else {
+    drawText('无', x + w / 2, y + sectionH + 70 * scale, 11 * scale, COLORS.TEXT_MUTED);
+  }
+}
+
+// 月份圆圈显示
+function renderMonthCircles(startX, startY, areaW, areaH, captured, scale, highlight) {
+  const months = {};
+  for (const id of captured) {
+    const m = Math.floor(id / 4) + 1;
+    months[m] = (months[m] || 0) + 1;
+  }
+
+  const sortedMonths = Object.keys(months).map(Number).sort((a, b) => a - b);
+
+  const circleR = 14 * scale;
+  const cols = Math.min(sortedMonths.length, 3);
+  const rows = Math.ceil(sortedMonths.length / cols);
+  const spacingX = (areaW) / Math.max(cols, 1);
+  const spacingY = areaH / Math.max(rows, 1);
+
+  for (let i = 0; i < sortedMonths.length; i++) {
+    const m = sortedMonths[i];
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const cx = startX + spacingX * col + spacingX / 2;
+    const cy = startY + spacingY * row + spacingY / 2;
+
+    const color = COLORS.MONTH_COLORS[m - 1] || '#888';
+
+    ctx.save();
+    ctx.shadowColor = COLORS.SHADOW;
+    ctx.shadowBlur = 3 * scale;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(cx, cy, circleR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 月份数字
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${11 * scale}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`${m}`, cx, cy + 2 * scale);
+
+    // 数量
+    if (highlight) {
+      ctx.fillStyle = COLORS.GOLD_DARK;
+      ctx.font = `9px sans-serif`;
+      ctx.fillText(`×${months[m]}`, cx, cy + 13 * scale);
+    }
+  }
 }
 
 // --- 玩家手牌 ---
@@ -1440,22 +1601,34 @@ function renderTestMode(W, H, cw, ch) {
   drawBg();
   if (!testModeState) return;
 
-  // 场牌区
-  const fa = LAYOUT.areas.field;
-  const fX = W * fa.x, fY = H * fa.y, fW = W * fa.w, fH = H * fa.h;
+  const scale = Math.min(W / 1920, H / 1080);
+  const capCount = testModeState.captured.length;
   const fcW = cw * LAYOUT.cardSizes.field, fcH = ch * LAYOUT.cardSizes.field;
 
-  ctx.fillStyle = 'rgba(200,184,150,0.4)';
-  roundRect(fX, fY, fW, fH, 20);
+  // === 主区域：场牌(左2/3) + 捕获(右1/3) ===
+  const mainY = H * 0.19;
+  const mainH = H * 0.48;
+  const mainX = W * 0.05;
+  const mainW = W * 0.9;
+  const fieldW = mainW * 0.66;
+  const capturedW = mainW * 0.33;
+
+  // 场牌区
+  const fx = mainX;
+  const fy = mainY;
+  const fw = fieldW - 10 * scale;
+  const fh = mainH;
+
+  ctx.fillStyle = 'rgba(200,184,150,0.35)';
+  roundRect(fx, fy, fw, fh, 16 * scale);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(60,30,10,0.15)';
-  ctx.lineWidth = 2;
-  roundRect(fX, fY, fW, fH, 20);
+  ctx.strokeStyle = 'rgba(60,30,10,0.12)';
+  ctx.lineWidth = 1.5 * scale;
+  roundRect(fx, fy, fw, fh, 16 * scale);
   ctx.stroke();
 
-  // 场牌排列
   if (testModeState.field.length > 0) {
-    const padding = 15;
+    const padding = 12;
     const field = testModeState.field;
     const count = field.length;
     let cols, rows;
@@ -1463,35 +1636,87 @@ function renderTestMode(W, H, cw, ch) {
     else if (count <= 8) { cols = 4; rows = 2; }
     else { cols = 4; rows = 3; }
 
-    const gridW = (fW - padding * 2) / cols;
-    const gridH = (fH - padding * 2 - 35) / rows;
-    const cardW = Math.min(fcW, gridW * 0.88);
-    const cardH = Math.min(fcH, gridH * 0.92);
+    const availW = fw - padding * 2;
+    const availH = fh - padding * 2 - 40;
+    const gridW = availW / cols;
+    const gridH = availH / rows;
+    const cardW = Math.min(fcW, gridW * 0.85);
+    const cardH = Math.min(fcH, gridH * 0.88);
 
     field.forEach((id, i) => {
       const col = i % cols, row = Math.floor(i / cols);
-      const cx = fX + padding + col * gridW + (gridW - cardW) / 2;
-      const cy = fY + 25 + row * gridH + (gridH - cardH) / 2;
-      drawCardRaw(cx, cy, id, cardW, cardH);
+      const cardX = fx + padding + col * gridW + (gridW - cardW) / 2;
+      const cardY = fy + 38 + row * gridH + (gridH - cardH) / 2;
+      drawCardRaw(cardX, cardY, id, cardW, cardH);
     });
   } else {
-    drawText('场牌区', fX + fW / 2, fY + fH / 2, 22, COLORS.TEXT_MUTED);
+    drawText('场牌区', fx + fw / 2, fy + fh / 2, 20 * scale, COLORS.TEXT_MUTED);
   }
 
   // 山札
-  const mw = 70, mh = 90;
-  const scale = Math.min(W / 1920, H / 1080);
-  const mx = W * 0.92 - mw / 2;
-  const my = H * 0.19;
-  ctx.fillStyle = '#5D4037';
-  roundRect(mx, my, mw, mh, 8);
+  renderMountainAt(fx + fw - 45 * scale, fy + 8 * scale, scale);
+
+  // 回合指示器
+  renderTurnIndicatorAt(fx + fw / 2 - 70 * scale, fy + 4 * scale, scale);
+
+  // 捕获区
+  const cx = fx + fw + 10 * scale;
+  const cy = mainY;
+  const cw2 = capturedW;
+  const ch2 = mainH;
+
+  ctx.fillStyle = 'rgba(253,242,248,0.5)';
+  roundRect(cx, cy, cw2, ch2, 16 * scale);
   ctx.fill();
-  ctx.strokeStyle = '#795548';
-  ctx.lineWidth = 1.5;
-  roundRect(mx, my, mw, mh, 8);
+  ctx.strokeStyle = COLORS.SAKURA_LIGHT;
+  ctx.lineWidth = 1.5 * scale;
+  roundRect(cx, cy, cw2, ch2, 16 * scale);
   ctx.stroke();
-  drawText('山札', mx + mw / 2, my + mh * 0.38, 16 * scale, '#FFF8E1');
-  drawText(String(testModeState.deck.length), mx + mw / 2, my + mh * 0.65, 20 * scale, COLORS.GOLD);
+
+  // 单机捕获显示
+  if (capCount > 0) {
+    const months = {};
+    for (const id of testModeState.captured) {
+      const m = Math.floor(id / 4) + 1;
+      months[m] = (months[m] || 0) + 1;
+    }
+    const sortedMonths = Object.keys(months).map(Number).sort((a, b) => a - b);
+
+    drawText('我的捕获', cx + cw2 / 2, cy + 18 * scale, 14 * scale, COLORS.TEXT_MUTED);
+
+    const circleR = 14 * scale;
+    const cols = Math.min(sortedMonths.length, 3);
+    const areaW = cw2 - 24 * scale;
+    const areaH = ch2 - 40 * scale;
+    const spacingX = areaW / Math.max(cols, 1);
+    const rows = Math.ceil(sortedMonths.length / cols);
+    const spacingY = areaH / Math.max(rows, 1);
+
+    for (let i = 0; i < sortedMonths.length; i++) {
+      const m = sortedMonths[i];
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const mcx = cx + 12 * scale + spacingX * col + spacingX / 2;
+      const mcy = cy + 30 * scale + spacingY * row + spacingY / 2;
+
+      const color = COLORS.MONTH_COLORS[m - 1] || '#888';
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(mcx, mcy, circleR, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${11 * scale}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`${m}`, mcx, mcy + 2 * scale);
+
+      ctx.fillStyle = COLORS.GOLD_DARK;
+      ctx.font = `9px sans-serif`;
+      ctx.fillText(`×${months[m]}`, mcx, mcy + 13 * scale);
+    }
+  } else {
+    drawText('无捕获', cx + cw2 / 2, cy + ch2 / 2, 14 * scale, COLORS.TEXT_MUTED);
+  }
 
   // 玩家手牌
   const pa = LAYOUT.areas.playerHand;
@@ -1505,60 +1730,20 @@ function renderTestMode(W, H, cw, ch) {
     drawCardRaw(handStart + i * (cw + gap), pY, id, cw, ch);
   });
 
-  // 收集区（右侧）
-  const capCount = testModeState.captured.length;
-  if (capCount > 0) {
-    const months = {};
-    for (const id of testModeState.captured) {
-      const m = Math.floor(id / 4) + 1;
-      months[m] = (months[m] || 0) + 1;
-    }
-    const sortedMonths = Object.keys(months).map(Number).sort((a, b) => a - b);
-
-    const rightX = W * (fa.x + fa.w) - 20 * scale;
-    const bottomY = H * (fa.y + fa.h) - 20 * scale;
-    const circleR = 16 * scale;
-    const spacing = 32 * scale;
-    let cx = rightX;
-
-    for (const m of sortedMonths) {
-      const color = COLORS.MONTH_COLORS[m - 1] || '#888';
-      ctx.fillStyle = COLORS.TEXT_MUTED;
-      ctx.font = `${10 * scale}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(`${m}月`, cx, bottomY - circleR * 2 - 6 * scale);
-
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(cx, bottomY - circleR, circleR, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = '#fff';
-      ctx.font = `bold ${13 * scale}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(`×${months[m]}`, cx, bottomY - circleR + 5 * scale);
-      cx -= spacing;
-    }
-  }
-
-  // 回合指示器
-  const iw = 160 * scale, ih = 36 * scale;
-  const ix = W / 2 - iw / 2;
-  const iy = H * 0.175;
-  ctx.fillStyle = COLORS.TURN_MY;
-  roundRect(ix, iy, iw, ih, 18 * scale);
-  ctx.fill();
-  drawText('你的回合', ix + iw / 2, iy + ih * 0.62, 18 * scale, '#fff');
-
   // 底部状态栏
   const sbY = H * 0.84;
   ctx.fillStyle = 'rgba(60,30,10,0.12)';
   ctx.fillRect(0, sbY, W, H * 0.16);
-  drawText('单机测试', W * 0.08, sbY + H * 0.08, 20 * scale, COLORS.TEXT_DARK, 'left');
-  drawText(`剩余: ${testModeState.deck.length}张`, W * 0.75, sbY + H * 0.08, 18 * scale, COLORS.TEXT_MUTED, 'left');
-  drawText(`已收集: ${capCount}张`, W * 0.92, sbY + H * 0.08, 16 * scale, COLORS.SAKURA_DARK, 'right');
+  ctx.strokeStyle = 'rgba(60,30,10,0.1)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, sbY);
+  ctx.lineTo(W, sbY);
+  ctx.stroke();
 
-  drawText(statusMsg, W / 2, H - 20, 18 * scale, COLORS.GOLD_DARK);
+  drawText('单机测试', W * 0.08, sbY + H * 0.08, 20 * scale, COLORS.TEXT_DARK, 'left');
+  drawText(`剩余: ${testModeState.deck.length}张`, W * 0.5, sbY + H * 0.08, 18 * scale, COLORS.TEXT_MUTED);
+  drawText(`已收集: ${capCount}张`, W * 0.92, sbY + H * 0.08, 16 * scale, COLORS.SAKURA_DARK, 'right');
 }
 
 // 测试模式输入
